@@ -2,6 +2,7 @@ import os
 import json
 from redis_handler import RedisHandler
 from category_classifier import CategoryClassifier
+from model_container import ModelContainer
 from utils import log_utils
 
 
@@ -102,7 +103,8 @@ def classify(message, clf: CategoryClassifier):
 
 if __name__ == '__main__':
 
-  clf = CategoryClassifier.load(MODEL_PATH)
+  mc = ModelContainer.load(MODEL_PATH)
+  clf = CategoryClassifier(mc)
 
   rh = RedisHandler(REDIS_HOST, REDIS_PORT)
   rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, classify, clf)

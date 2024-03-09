@@ -1,9 +1,7 @@
-import pickle
-from datetime import date
 from utils import log_utils
 import logging
+from model_container import ModelContainer
 
-class CategoryClassifier: pass
 
 class CategoryClassifier:
 
@@ -12,25 +10,12 @@ class CategoryClassifier:
     level=logging.INFO
   )
 
-  def __init__(self, tfidf, clfs, thresholds, target_names, results):
-    self.tfidf = tfidf
-    self.clfs = clfs
-    self.thresholds = thresholds 
-    self.target_names = target_names
-    self.results = results
-
-  def save(self, filename):
-    self.last_save_date = date.today()
-    with open(filename, 'wb') as f:
-      pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-      self.log.info(f"saved {self.__class__.__name__} at {filename}")
-
-  @classmethod
-  def load(cls, filename) -> CategoryClassifier:
-    with open(filename, 'rb') as f:
-      mc = pickle.load(f)
-      cls.log.info(f"loaded {cls.__name__} from {filename}")
-    return mc
+  def __init__(self, mc: ModelContainer):
+    self.mc = mc
+    self.tfidf = mc.tfidf
+    self.clfs = mc.clfs
+    self.thresholds = mc.thresholds
+    self.target_names = mc.target_names
 
   def predict(self, text: str) -> list[str]:
     vect = self.tfidf.transform([text])
