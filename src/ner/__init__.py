@@ -1,0 +1,1 @@
+from ner.entity_recognizer import SpacyEntityRecognizer

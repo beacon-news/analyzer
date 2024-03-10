@@ -139,17 +139,14 @@ class RedisHandler:
     try: 
       group_info = self.r.xinfo_groups(stream_name)
 
-      exists = False
       for group in group_info:
         if group["name"] == consumer_group:
           self.log.info(f"consumer group {consumer_group} already exists")
-          exists = True
-          break
+          return
 
-      if not exists:
-        self.log.info(f"consumer group {consumer_group} does not exist")
-        self.r.xgroup_create(name=stream_name, groupname=consumer_group, mkstream=True)
-        self.log.info(f"created/asserted consumer group {consumer_group} for stream {stream_name}")
+      self.log.info(f"consumer group {consumer_group} does not exist")
+      self.r.xgroup_create(name=stream_name, groupname=consumer_group, mkstream=True)
+      self.log.info(f"created/asserted consumer group {consumer_group} for stream {stream_name}")
 
     except Exception:
       self.log.exception("error while creating/asserting consumer group")

@@ -1,14 +1,6 @@
-from utils import log_utils
-import logging
-from model_container import ModelContainer
-
+from classifier.model_container import ModelContainer
 
 class CategoryClassifier:
-
-  log = log_utils.create_console_logger(
-    name='CategoryClassifier',
-    level=logging.INFO
-  )
 
   def __init__(self, mc: ModelContainer):
     self.mc = mc
