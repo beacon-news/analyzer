@@ -40,6 +40,7 @@ em = EmbeddingsModel(ec)
 ser = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
 
 rh = RedisHandler(REDIS_HOST, REDIS_PORT)
+es = ElasticSearchStore()
 
 
 def print_message(message):
@@ -80,7 +81,6 @@ log = log_utils.create_console_logger("MessageProcessor")
 def analyze(message):
 
   try: 
-    url = message[1]["url"] 
     content = json.loads(message[1]["article"])
 
     if 'components' not in content:
@@ -125,18 +125,19 @@ def analyze(message):
       "analyzer": {
         "categories": labels,
         "entities": entities,
-        "embeddings": embeddings,
+        "embeddings": embeddings.tolist(),
       },
       "scraper": content,
     }
 
     print("=================================")
-    # ndarray embeddings not serializable
-    # print(f"result: {json.dumps(result, indent=2)}")
-    print(f"classification results: {labels}")
-    print(f"entities: {entities}")
-    print(f"embeddings shape: {embeddings.shape}")
+    print(f"result: {json.dumps(result, indent=2)}")
+    # print(f"classification results: {labels}")
+    # print(f"entities: {entities}")
+    # print(f"embeddings shape: {embeddings.shape}")
     print("")
+
+    # store in elasticsearch
   
   except Exception:
     log.exception(f"error trying to classify message: {message}")

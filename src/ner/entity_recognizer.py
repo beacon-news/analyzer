@@ -28,7 +28,7 @@ class SpacyEntityRecognizer:
     self.entity_types = ['EVENT', 'FAC', 'GPE', 'LAW', 'LOC', 'NORP', 'ORG', 'PERSON', 'WORK_OF_ART', 'PRODUCT']
 
 
-  def ner(self, text: str) -> set[str]:
+  def ner(self, text: str) -> list[str]:
     # see spacy.explain() for descriptions
     named_entities = set() 
 
@@ -37,7 +37,7 @@ class SpacyEntityRecognizer:
       if ent.label_ in self.entity_types:
         named_entities.add(ent.text)
 
-    return named_entities 
+    return list(named_entities)
       
 
 

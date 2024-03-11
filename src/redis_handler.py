@@ -63,6 +63,7 @@ class RedisHandler:
         )
       except Exception:
         self.log.exception("error while consuming message")
+        continue
       except KeyboardInterrupt:
         self.log.info("shutting down consumer, waiting for autoclaim thread to finish")
         autoclaim_exit.set() 
@@ -133,21 +134,15 @@ class RedisHandler:
       time.sleep(claim_interval / 1000)
     
 
-
   def __try_create_consumer_group(self, stream_name, consumer_group):
-    # try creating the consumer group
-    try: 
-      group_info = self.r.xinfo_groups(stream_name)
-
-      for group in group_info:
-        if group["name"] == consumer_group:
-          self.log.info(f"consumer group {consumer_group} already exists")
-          return
-
-      self.log.info(f"consumer group {consumer_group} does not exist")
+    try:
       self.r.xgroup_create(name=stream_name, groupname=consumer_group, mkstream=True)
       self.log.info(f"created/asserted consumer group {consumer_group} for stream {stream_name}")
-
+    except redis.exceptions.ResponseError as e:
+      if "BUSYGROUP" in str(e):
+        self.log.info(f"consumer group {consumer_group} already exists")
+      else:
+        raise
     except Exception:
-      self.log.exception("error while creating/asserting consumer group")
+      self.log.exception(f"error while creating consumer group {consumer_group} for stream {stream_name}")
   
