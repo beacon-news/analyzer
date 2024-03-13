@@ -31,7 +31,6 @@ class ElasticsearchStore:
     self.log.info(f"connecting to Elasticsearch at {conn}")
     self.es = Elasticsearch(conn, basic_auth=(user, password), ca_certs=cacerts, verify_certs=verify_certs)
 
-
     # assert articles index
     try:
       self.log.info(f"creating/asserting index '{self.index_name}'")
@@ -49,7 +48,8 @@ class ElasticsearchStore:
                 }
               },
               "embeddings": {
-                "type": "float",
+                "type": "dense_vector",
+                "dims": 384, # depends on model used
               },
               "entities": {
                 "type": "text"

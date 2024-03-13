@@ -1,5 +1,5 @@
 from topic_modeling.bertopic_container import BertopicContainer
-from embeddings.embeddings_container import EmbeddingsContainer
+from embeddings.embeddings_container import EmbeddingsModelContainer
 
 print("importing bertopic")
 # from bertopic import BERTopic
@@ -11,7 +11,7 @@ print("finished importing bertopic")
 
 if __name__ == '__main__':
 
-  ec = EmbeddingsContainer.load('models/embeddings/embeddings_container_2024-03-10.pkl')
+  ec = EmbeddingsModelContainer.load('models/embeddings/embeddings_container_2024-03-10.pkl')
   bc = BertopicContainer.load('models/bertopic/bertopic_container_2024-03-10.pkl', ec.embeddings_model)
 
   t = 'Donald Trump caught in another scandal while he was on vacation in Canada'

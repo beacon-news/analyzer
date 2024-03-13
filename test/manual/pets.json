@@ -1,0 +1,24 @@
+{
+  "url": "https://abcnews.go.com/Pets/everything-about-pets",
+  "scrape_time": "2024-03-05T21:58:25.945274",
+  "components": {
+    "article": [
+      {
+        "title": "Why dogs are getting sad when you're not around"
+      },
+      {
+        "author": "Morgan Korn"
+      },
+      {
+        "publish_date": "2024-02-08T06:07:00"
+      },
+      {
+        "paragraphs": [
+          "Pets are a good companion no matter what",
+          "Dogs and cats are not the same at all",
+          "foxes have dog hardware and cat software"
+        ]
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@ import os
 import json
 from redis_handler import RedisHandler
 from classifier import CategoryClassifier, ModelContainer
-from embeddings import EmbeddingsContainer, EmbeddingsModel
+from embeddings import EmbeddingsModelContainer, EmbeddingsModel
 from ner import SpacyEntityRecognizer
 from utils import log_utils
 from article_store.elasticsearch_store import ElasticsearchStore
@@ -35,7 +35,7 @@ ELASTIC_TLS_INSECURE = bool(check_env('ELASTIC_TLS_INSECURE', False))
 mc = ModelContainer.load(CAT_CLF_MODEL_PATH)
 clf = CategoryClassifier(mc)
 
-ec = EmbeddingsContainer.load(EMBEDDINGS_MODEL_PATH)
+ec = EmbeddingsModelContainer.load(EMBEDDINGS_MODEL_PATH)
 em = EmbeddingsModel(ec)
 
 ser = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
@@ -55,33 +55,6 @@ def print_message(message):
 
 
 log = log_utils.create_console_logger("MessageProcessor")
-
-# schema = {
-#   "description": "scraped article with metadata",
-#   "type": "object",
-#   "required": ["url", "scrape_time", "components"],
-#   "properties": {
-#     "url": {
-#       "type": "string"
-#     },
-#     "scrape_time": {
-#       "type": "string"
-#     },
-#     "components": {
-#       "type": "object",
-#       "required": ["article"],
-#       "properties": {
-#         "article": {
-#           "type": "array",
-#           "items": {
-#             "type": "object",
-
-#           }
-#         }
-#       }
-#     }
-#   }
-# }
 
 
 def analyze(text) -> tuple[list[str], list[float], list[str]]:
@@ -161,15 +134,6 @@ def process(message):
     # store in elasticsearch
     es.store(article, analysis)
 
-    # result = {
-    #   "analyzer": {
-    #     "categories": labels,
-    #     "entities": entities,
-    #     "embeddings": embeddings.tolist(),
-    #   },
-    #   "scraper": content,
-    # }
-
     # only print some embeddings
     p_a = analysis.copy()
     p_a['embeddings'] = p_a['embeddings'][:4]
@@ -186,6 +150,5 @@ def process(message):
 
 
 if __name__ == '__main__':
-
   rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process)
 
