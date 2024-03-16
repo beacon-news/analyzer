@@ -39,5 +39,9 @@ class SpacyEntityRecognizer:
 
     return list(named_entities)
       
-
+  def ner_batch(self, texts: list[str]) -> list[list[str]]:
+    all_ents = []
+    for text in texts:
+      all_ents.append(self.ner(text))
+    return all_ents
 
