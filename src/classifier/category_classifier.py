@@ -1,9 +1,19 @@
 from classifier.model_container import ModelContainer
 import numpy as np
+from utils import log_utils
+import logging
 
 class CategoryClassifier:
 
-  def __init__(self, mc: ModelContainer):
+  @classmethod
+  def configure_logging(cls, level: int):
+    cls.log = log_utils.create_console_logger(
+      name=cls.__name__,
+      level=level
+    )
+
+  def __init__(self, mc: ModelContainer, log_level: int = logging.INFO):
+    self.configure_logging(log_level)
     self.mc = mc
     self.tfidf = mc.tfidf
     self.clfs = mc.clfs
@@ -11,6 +21,7 @@ class CategoryClassifier:
     self.target_names = mc.target_names
 
   def predict(self, text: str) -> list[str]:
+    self.log.info(f"predicting category for single document {text[:20]}...")
     vect = self.tfidf.transform([text])
 
     labels = []
@@ -22,6 +33,8 @@ class CategoryClassifier:
     return labels
 
   def predict_batch(self, texts: list[str]) -> list[str]:
+    self.log.info(f"predicting category for batch of {len(texts)} documents")
+    
     vects = self.tfidf.transform(texts)
 
     labels = [[] for _ in range(len(texts))]

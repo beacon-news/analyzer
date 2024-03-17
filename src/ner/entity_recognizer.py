@@ -40,6 +40,7 @@ class SpacyEntityRecognizer:
     return list(named_entities)
       
   def ner_batch(self, texts: list[str]) -> list[list[str]]:
+    self.log.info(f"predicting named entities for batch of {len(texts)} documents")
     all_ents = []
     for text in texts:
       all_ents.append(self.ner(text))

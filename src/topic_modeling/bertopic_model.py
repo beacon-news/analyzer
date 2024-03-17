@@ -1,6 +1,6 @@
 from utils import log_utils
 import logging
-from analyzer.src.topic_modeling.bertopic_container import BertopicContainer
+from topic_modeling.bertopic_container import BertopicContainer
 
 
 class BertopicModel:

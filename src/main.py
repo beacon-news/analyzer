@@ -7,7 +7,7 @@ from embeddings import EmbeddingsModelContainer, EmbeddingsModel
 from ner import SpacyEntityRecognizer
 from utils import log_utils
 from article_store.elasticsearch_store import ElasticsearchStore
-from pydantic import BaseModel
+from datetime import datetime
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -37,8 +37,10 @@ ELASTIC_TLS_INSECURE = bool(check_env('ELASTIC_TLS_INSECURE', False))
 
 MONGO_HOST = check_env('MONGO_HOST', 'localhost')
 MONGO_PORT = int(check_env('MONGO_PORT', 27017))
-MONGO_DB = check_env('MONGO_DB_NAME', 'scraper')
-MONGO_COLLECTION = check_env('MONGO_COLLECTION_NAME', 'scraped_articles')
+MONGO_DB_SCRAPER = check_env('MONGO_DB_SCRAPER', 'scraper')
+MONGO_DB_ANALYZER = check_env('MONGO_DB_ANALYZER', 'analyzer')
+MONGO_COLLECTION_SCRAPER = check_env('MONGO_COLLECTION_SCRAPER', 'scraped_articles')
+MONGO_COLLECTION_ANALYZER = check_env('MONGO_COLLECTION_ANALYZER', 'scraped_articles')
 mr = MongoRepository(host=MONGO_HOST, port=MONGO_PORT)
 
 mc = ModelContainer.load(CAT_CLF_MODEL_PATH)
@@ -49,13 +51,13 @@ em = EmbeddingsModel(ec)
 
 ser = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
 
-es = ElasticsearchStore(
-  ELASTIC_CONN, 
-  ELASTIC_USER, 
-  ELASTIC_PASSWORD, 
-  ELASTIC_CA_PATH, 
-  not ELASTIC_TLS_INSECURE
-)
+# es = ElasticsearchStore(
+#   ELASTIC_CONN, 
+#   ELASTIC_USER, 
+#   ELASTIC_PASSWORD, 
+#   ELASTIC_CA_PATH, 
+#   not ELASTIC_TLS_INSECURE
+# )
 
 
 def print_message(message):
@@ -109,6 +111,7 @@ def process(docs: list[dict]):
           authors.append(component['author'])
         elif 'publish_date' in component:
           publish_date = component['publish_date']
+          publish_date = datetime.fromisoformat(publish_date).replace(second=0, microsecond=0)
 
       # transform the scraped format into a more manageable one
       article = {
@@ -136,19 +139,46 @@ def process(docs: list[dict]):
         "embeddings": embeddings[i],
       })
     
+    final_docs = [
+      {
+        "analyzer": {
+          "categories": art_labels,
+          "entities": art_entities,
+          "embeddings": art_embeddings,
+        },
+        "article": {
+          "url": article['url'],
+          "publish_date": article['publish_date'],
+          "author": article['author'],
+          "title": article['title'],
+          "paragraphs": article['paragraphs'],
+        }
+      } for article, art_labels, art_embeddings, art_entities in zip(transformed_docs, labels, embeddings, entities)
+    ]
+
+    # replace publish_date with iso time string
+    es_docs = []
+    for doc in final_docs:
+      doc['article']['publish_date'] = doc['article']['publish_date'].isoformat()
+      es_docs.append(doc)
+    
     # store in elasticsearch
-    es.store_batch(transformed_docs, analyzed_docs)
+    # es.store_batch(es_docs)
+
+    # store in mongodb
+    mr.store_articles(MONGO_DB_ANALYZER, MONGO_COLLECTION_ANALYZER, final_docs)
+
 
     # only print some embeddings
     # p_a = analysis.copy()
     # p_a['embeddings'] = p_a['embeddings'][:4]
 
-    print("=================================")
-    print(f"result: {json.dumps(transformed_docs, indent=2)}")
-    print("********************************")
-    print(f"result: {json.dumps(analyzed_docs, indent=2)}")
-    print("=================================")
-    print("")
+    # print("=================================")
+    # print(f"result: {json.dumps(transformed_docs, indent=2)}")
+    # print("********************************")
+    # print(f"result: {json.dumps(analyzed_docs, indent=2)}")
+    # print("=================================")
+    # print("")
     
     # p_a = analysis.copy()
     # p_a['embeddings'] = p_a['embeddings'][:4]
@@ -267,8 +297,122 @@ def analyze(text) -> tuple[list[str], list[float], list[str]]:
 #     log.exception(f"error trying to analyze message: {message}")
 
 
+from topic_modeling.bertopic_container import *
+from topic_modeling.bertopic_model import *
+import numpy as np
+
+# BERTOPIC_MODEL_PATH = check_env("BERTOPIC_MODEL_PATH")
+# bc = BertopicContainer.load(BERTOPIC_MODEL_PATH, em.ec.embeddings_model)
+# bm = BertopicModel(bc)
+
+log.info("importing BERTopic and its dependencies")
+from bertopic import BERTopic
+
+from umap import UMAP
+from hdbscan import HDBSCAN
+from sklearn.feature_extraction.text import CountVectorizer
+from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
+
+log.info("initializing BERTopic dependencies")
+
+umap_model = UMAP(
+    n_neighbors=15, # global / local view of the manifold default 15
+    n_components=5, # target dimensions default 5
+    metric='cosine',
+    min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
+)
+
+hdbscan_model = HDBSCAN(
+    min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
+    metric='euclidean',
+    cluster_selection_method='eom',
+    prediction_data=True, # if we want to approximate clusters for new points
+)
+
+vectorizer_model = CountVectorizer(
+    ngram_range=(1, 1),
+    stop_words='english',
+)
+
+
+# ps = PartOfSpeech("en_core_web_sm")
+mmr = MaximalMarginalRelevance(diversity=0.3)
+
+# representation_model = [ps, mmr]
+representation_model = mmr
+
+bt = BERTopic(
+    embedding_model=em.ec.embeddings_model,
+    umap_model=umap_model,
+    hdbscan_model=hdbscan_model,
+    vectorizer_model=vectorizer_model,
+    representation_model=representation_model,
+    # verbose=True
+)
+
+import pandas as pd
+
+pd.set_option('display.max_columns', None)
+
+def model_topics(docs):
+
+  doc_texts = ["\n".join(d["article"]["title"]) + "\n" + "\n".join(d["article"]["paragraphs"]) for d in docs]
+  doc_embeddings = np.array([d["analyzer"]["embeddings"] for d in docs])
+
+  log.info(f"fitting topic modeling model on {len(doc_texts)} docs")
+
+  # bm.bc.bertopic.fit_transform(doc_texts, doc_embeddings)
+  bt.fit_transform(doc_texts, doc_embeddings)
+
+  # ti = bm.bc.bertopic.get_topic_info()
+  ti = bt.get_topic_info()
+  print(ti)
+  print("=============================")
+
+  # di = bm.bc.bertopic.get_document_info(doc_texts)
+  di = bt.get_document_info(doc_texts)
+
+  print(di)
+  print("=======================================")
+
+  exit(0)
+
+
+from multiprocessing import Process
+
 if __name__ == '__main__':
   # rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process)
 
+  # TODO: use multiprocessing
 
-  mr.watch_collection(MONGO_DB, MONGO_COLLECTION, 1000, 5, process)
+  # mr.watch_collection(
+  #   MONGO_DB_SCRAPER, 
+  #   MONGO_COLLECTION_SCRAPER, 
+  #   1000, 
+  #   5, 
+  #   processed_update_field="analyzer.processed", 
+  #   callback=process
+  # )
+
+
+  # mr.watch_collection(
+  #   MONGO_DB_ANALYZER, 
+  #   MONGO_COLLECTION_ANALYZER, 
+  #   3000, 
+  #   200, 
+  #   processed_update_field="topic_modeling.processed",
+  #   callback=model_topics
+  # )
+
+  p2 = Process(target=mr.watch_collection, args=(
+    MONGO_DB_ANALYZER, 
+    MONGO_COLLECTION_ANALYZER, 
+    3000, 
+    200, 
+    "topic_modeling.processed",
+    model_topics
+  ))
+
+  p2.start()
+
+  p2.join()

@@ -8,7 +8,6 @@ class ElasticsearchStore:
 
   @classmethod
   def configure_logging(cls, level: int):
-    cls.loglevel = level
     cls.log = log_utils.create_console_logger(
       name=cls.__name__,
       level=level
@@ -58,7 +57,6 @@ class ElasticsearchStore:
           },
           "article": {
             "properties": {
-              # is it dumb to store the url?
               "url": {
                 "type": "keyword",
               },
@@ -83,51 +81,25 @@ class ElasticsearchStore:
         self.log.info(f"index {self.index_name} already exists")
 
   
-  def store(self, article: dict, analysis: dict) -> str:
-
-    doc = {
-      "analyzer": {
-        "categories": analysis['categories'],
-        "entities": analysis['entities'],
-        "embeddings": analysis['embeddings'],
-      },
-      "article": {
-        "url": article['url'],
-        "publish_date": article['publish_date'],
-        "author": article['author'],
-        "title": article['title'],
-        "paragraphs": article['paragraphs'],
-      }
-    }
-
+  def store(self, analyzed_article: dict) -> str:
     id = uuid.uuid4()
-    resp = self.es.index(index=self.index_name, id=id, document=doc)
+    resp = self.es.index(index=self.index_name, id=id, document=analyzed_article)
     self.log.info(f"stored article with id {resp['_id']} in {self.index_name}")
     return resp["_id"]
 
-  def store_batch(self, articles: list[dict], analyses: list[dict]) -> list[str]:
-    for ok, action in helpers.streaming_bulk(self.es, self.__generate_docs(articles, analyses)):
+  def store_batch(self, analyzed_articles: list[dict]) -> list[str]:
+    self.log.info(f"attempting to insert {len(analyzed_articles)} articles in {self.index_name}")
+    for ok, action in helpers.streaming_bulk(self.es, self.__generate_doc_actions(analyzed_articles)):
       if not ok:
         self.log.error(f"failed to bulk store article: {action}")
         continue
   
-  def __generate_docs(self, articles: list[dict], analyses: list[dict]):
+  def __generate_doc_actions(self, articles: list[dict]):
     for i in range(len(articles)):
       id = str(uuid.uuid4())
-      doc = {
+      action = {
         "_id": id,
         "_index": self.index_name,
-        "analyzer": {
-          "categories": analyses[i]['categories'],
-          "entities": analyses[i]['entities'],
-          "embeddings": analyses[i]['embeddings'],
-        },
-        "article": {
-          "url": articles[i]['url'],
-          "publish_date": articles[i]['publish_date'],
-          "author": articles[i]['author'],
-          "title": articles[i]['title'],
-          "paragraphs": articles[i]['paragraphs'],
-        }
+        **articles[i]
       }
-      yield doc
+      yield action

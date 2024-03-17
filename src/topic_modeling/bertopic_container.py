@@ -1,5 +1,6 @@
 import pickle
 from datetime import date
+from bertopic import BERTopic
 
 # Contains bertopic model for topic modeling
 
@@ -7,7 +8,7 @@ class BertopicContainer: pass
 
 class BertopicContainer:
 
-  def __init__(self, bertopic, train_date):
+  def __init__(self, bertopic: BERTopic, train_date):
     self.bertopic = bertopic
     self.train_date = train_date
 
@@ -37,7 +38,7 @@ class BertopicContainer:
       d = pickle.load(f)
       save_date = d['save_date']
       train_date = d['train_date']
-      bertopic = d['bertopic']
+      bertopic: BERTopic = d['bertopic']
 
       # set the embedding model separately
       bertopic.embedding_model.embedding_model = embeddings_model
