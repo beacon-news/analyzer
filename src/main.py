@@ -1,4 +1,5 @@
 import os
+import uuid
 import json
 from redis_handler import RedisHandler
 from mongodb_repository import MongoRepository
@@ -369,10 +370,123 @@ def model_topics(docs):
   print(ti)
   print("=============================")
 
-  # di = bm.bc.bertopic.get_document_info(doc_texts)
-  di = bt.get_document_info(doc_texts)
 
-  print(di)
+  # 1. create the topics
+
+  d = {
+    "_id": ...,
+    "topic": "hungary nato orban",
+    "start_date": ...,
+    "end_date": ...,
+    "count": 103,
+    "repr_docs": [
+      {
+        "_id":...,
+        "url": ...,
+        "publish_date": ...,
+        "author": ...,
+        "title": ...,
+      },
+      {
+        "_id":...,
+        "url": ...,
+        "publish_date": ...,
+        "author": ...,
+        "title": ...,
+      },
+      {
+        "_id":...,
+        "url": ...,
+        "publish_date": ...,
+        "author": ...,
+        "title": ...,
+      },
+    ],
+  }
+
+  # create the topics without docs
+  topics = []
+  topic_info = bt.get_topic_info()
+
+  start_time = datetime.now().isoformat()
+  end_time = datetime.now().isoformat()
+
+  topic_df_dict = topic_info.loc[topic_info["Topic"] != -1, ["Count", "Representation"]].to_dict()
+  for d in zip(topic_df_dict["Count"].values(), topic_df_dict["Representation"].values()):
+    topics.append({
+      "_id": uuid.uuid4(), 
+      "start_time": start_time,
+      "end_time": end_time,
+      "topic": " ".join(d[1]),
+      "count": d[0],
+      "representative_articles": [],
+      "articles": [],
+    })
+
+  # add docs to topics
+  doc_info = bt.get_document_info(doc_texts)
+
+  # don't filter out anything, we need the correct order to correlate with 'docs'
+  doc_df_dict = doc_info.loc[doc_info["Topic"] != -1, ["Topic", "Representative_document"]].to_dict()
+  for doc_ind, topic_ind, representative in zip(
+    doc_df_dict["Topic"].keys(), 
+    doc_df_dict["Topic"].values(), 
+    doc_df_dict["Representative_document"].values()
+  ):
+
+    # add duplicate of article to topic
+    art = docs[doc_ind]["article"]
+
+    art_duplicate = {
+      "_id": docs[doc_ind]["_id"],
+      "url": art["url"],
+      "publish_date": art["publish_date"],
+      "author": art["author"],
+      "title": art["title"],
+    }
+    
+    topics[topic_ind]["articles"].append(art_duplicate)
+    
+    # add representative doc
+    if representative:
+      topics[topic_ind]["representative_articles"].append(docs[doc_ind]["_id"])
+
+    # TODO: instead of updating articles, add doc ids to topics
+
+    # update the article with duplicate of topic
+    if "topics" not in docs[doc_ind]["analyzer"]: 
+      docs[doc_ind]["analyzer"]["topics"] = []
+    
+    docs[doc_ind]["analyzer"]["topics"].append(
+      {
+        "_id": topics[topic_ind]["_id"],
+        "topic": topics[topic_ind]["topic"],
+      }
+    )
+  
+  # insert the topics
+  mr.store_docs(MONGO_DB_ANALYZER, "topics", topics)
+
+  # TODO: insert into elasticsearch
+
+  
+
+  # di = bm.bc.bertopic.get_document_info(doc_texts)
+  # di = bt.get_document_info(doc_texts)
+
+  # print(di)
+  print(topics[0])
+  # print(json.dumps(topics[0], indent=2))
+  print("=======================================")
+  
+  import copy
+  cp = copy.deepcopy(docs)
+  for c in cp:
+    del c["analyzer"]["embeddings"]
+    del c["article"]["paragraphs"]
+
+  # print(json.dumps(cp[0], indent=2))
+  print(cp[0])
   print("=======================================")
 
   exit(0)

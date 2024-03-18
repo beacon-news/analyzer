@@ -11,7 +11,7 @@ class MongoRepository:
     )
 
     try:
-      self.__mc = MongoClient(host=host, port=port)
+      self.__mc = MongoClient(host=host, port=port, uuidRepresentation='standard')
       info = self.__mc.server_info()
       self.log.info(f"connected to mongodb, host {host}, port {port}, server info {info}")
   
@@ -127,4 +127,23 @@ class MongoRepository:
       self.log.debug(f"inserted ids {res.inserted_ids}")
     except Exception:
       self.log.exception(f"error when inserting articles into mongodb collection {collection_name}")
+      raise
+
+  def store_docs(self, db_name: str, collection_name: str, docs: list[dict]):
+    try:
+      # assert database
+      db = self.__mc.get_database(db_name)
+
+      # assert collection
+      collection = db.get_collection(collection_name)
+    except Exception:
+      self.log.exception(f"error while asserting database {db_name} and collection {collection_name}")
+      raise
+    
+    try:
+      res = collection.insert_many(docs)
+      self.log.info(f"inserted {len(docs)} documents into collection {collection_name}")
+      self.log.debug(f"inserted ids {res.inserted_ids}")
+    except Exception:
+      self.log.exception(f"error when inserting documents into mongodb collection {collection_name}")
       raise
