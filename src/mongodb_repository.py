@@ -1,6 +1,6 @@
 import time
 from utils import log_utils
-from pymongo import MongoClient
+from pymongo import MongoClient, collection
 
 
 class MongoRepository:
@@ -29,23 +29,13 @@ class MongoRepository:
       callback, 
       *callback_args
     ):
-    try:
-      # assert database
-      db = self.__mc.get_database(db_name)
-      self.log.info(f"using database {db_name}")
-
-      # assert collection
-      collection = db.get_collection(collection_name)
-      self.log.info(f"using collection {collection_name}")
-    except Exception:
-      self.log.exception(f"error while asserting database {db_name} and collection {collection_name}")
-      raise
     
+    coll = self.get_collection(db_name, collection_name)
     self.log.info(f"watching collection {collection_name}, interval {interval_ms}ms")
     
     while True:
       try:
-        # count = collection.count_documents({})
+        # count = coll.count_documents({})
 
         # if count == 0:
         #   self.log.info(f"no documents in collection {collection_name}")
@@ -55,7 +45,7 @@ class MongoRepository:
         # self.log.info(f"processing {count} documents from collection {collection_name}")
 
         # find all documents that have not been processed
-        cursor = collection.find(
+        cursor = coll.find(
           {
             processed_update_field: { "$exists": False }
           }, 
@@ -73,7 +63,7 @@ class MongoRepository:
         callback(docs, *callback_args)
 
         # mark all documents as processed
-        collection.update_many(
+        coll.update_many(
           {
             "_id": {
               "$in": [doc["_id"] for doc in docs]
@@ -109,20 +99,24 @@ class MongoRepository:
   #   except Exception:
   #     self.log.exception(f"error when inserting article into mongodb collection {collection_name}")
   #     raise
-    
-  def store_articles(self, db_name: str, collection_name: str, articles: list[dict]):
+
+  def get_collection(self, db_name: str, collection_name: str) -> collection.Collection:
     try:
       # assert database
       db = self.__mc.get_database(db_name)
 
       # assert collection
-      collection = db.get_collection(collection_name)
+      return db.get_collection(collection_name)
     except Exception:
       self.log.exception(f"error while asserting database {db_name} and collection {collection_name}")
       raise
+
+    
+  def store_articles(self, db_name: str, collection_name: str, articles: list[dict]):
+    coll = self.get_collection(db_name, collection_name)
     
     try:
-      res = collection.insert_many(articles)
+      res = coll.insert_many(articles)
       self.log.info(f"inserted {len(articles)} articles into collection {collection_name}")
       self.log.debug(f"inserted ids {res.inserted_ids}")
     except Exception:
@@ -130,18 +124,10 @@ class MongoRepository:
       raise
 
   def store_docs(self, db_name: str, collection_name: str, docs: list[dict]):
-    try:
-      # assert database
-      db = self.__mc.get_database(db_name)
-
-      # assert collection
-      collection = db.get_collection(collection_name)
-    except Exception:
-      self.log.exception(f"error while asserting database {db_name} and collection {collection_name}")
-      raise
+    coll = self.get_collection(db_name, collection_name)
     
     try:
-      res = collection.insert_many(docs)
+      res = coll.insert_many(docs)
       self.log.info(f"inserted {len(docs)} documents into collection {collection_name}")
       self.log.debug(f"inserted ids {res.inserted_ids}")
     except Exception:

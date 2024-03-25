@@ -95,9 +95,12 @@ class RedisHandler:
           # process the message
           callback(message, *callback_args)
 
+          # TODO: decide on this
           # do we want to delete?
-          # we might only want to trim here...
-          self.r.xdel(stream_name, message[0])
+          # we might only want to regularly trim, or use a capped stream
+          # self.r.xdel(stream_name, message[0])
+
+          self.log.debug(f"processed message {message}")
 
         except Exception:
           self.log.exception("error while processing message")

@@ -27,7 +27,7 @@ REDIS_HOST = check_env('REDIS_HOST', 'localhost')
 REDIS_PORT = int(check_env('REDIS_PORT', 6379))
 
 REDIS_CONSUMER_GROUP = check_env('REDIS_CONSUMER_GROUP', 'article_analyzer')
-REDIS_STREAM_NAME = check_env('REDIS_STREAM_NAME', 'scraped_articles')
+REDIS_STREAM_NAME = check_env('REDIS_STREAM_NAME', 'scraper_articles')
 
 ELASTIC_USER = check_env('ELASTIC_USER', 'elastic')
 ELASTIC_PASSWORD = check_env('ELASTIC_PASSWORD')
@@ -60,12 +60,47 @@ ser = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
 #   not ELASTIC_TLS_INSECURE
 # )
 
+rh = RedisHandler(REDIS_HOST, REDIS_PORT)
+
 
 def print_message(message):
   print(f"received from stream: {message}")
 
 
 log = log_utils.create_console_logger("MessageProcessor")
+
+
+def process_notification(message: tuple[str, dict]):
+
+  # message
+  # (redis_id, {"done_meta": "[{'id': 'x', 'url': 'y'}]"})
+  # json string
+
+  meta_list = json.loads(message[1]["done_meta"])
+  ids = [m['id'] for m in meta_list]
+
+  # get the scraped batch from MongoDB
+
+  coll = mr.get_collection(MONGO_DB_SCRAPER, MONGO_COLLECTION_SCRAPER)
+  limit = 200
+
+  cursor = coll.find(
+    {
+      "_id": {
+        "$in": ids
+      }
+    }, 
+    limit=limit
+  )
+
+  docs = [doc for doc in cursor]
+  if len(docs) == 0:
+    log.warning(f"no documents found in scraped batch, exiting")
+    return
+  
+  # process the batch
+  process(docs)
+
 
 
 def process(docs: list[dict]):
@@ -165,9 +200,11 @@ def process(docs: list[dict]):
     
     # store in elasticsearch
     # es.store_batch(es_docs)
+    # log.info(f"done storing batch of {len(final_docs)} articles in Elasticsearch")
 
     # store in mongodb
     mr.store_articles(MONGO_DB_ANALYZER, MONGO_COLLECTION_ANALYZER, final_docs)
+    log.info(f"done storing batch of {len(final_docs)} articles in MongoDB")
 
 
     # only print some embeddings
@@ -206,17 +243,17 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
 
   return (labels, embeddings.tolist(), entities)
 
-def analyze(text) -> tuple[list[str], list[float], list[str]]:
-  # classify the text
-  labels = clf.predict(text)
+# def analyze(text) -> tuple[list[str], list[float], list[str]]:
+#   # classify the text
+#   labels = clf.predict(text)
 
-  # create embeddings, take the first one as we only have 1 document
-  embeddings = em.encode([text])[0]
+#   # create embeddings, take the first one as we only have 1 document
+#   embeddings = em.encode([text])[0]
 
-  # get named entities
-  entities = ser.ner(text)
+#   # get named entities
+#   entities = ser.ner(text)
 
-  return (labels, embeddings.tolist(), entities)
+#   return (labels, embeddings.tolist(), entities)
 
 
 # def process(message):
@@ -298,58 +335,58 @@ def analyze(text) -> tuple[list[str], list[float], list[str]]:
 #     log.exception(f"error trying to analyze message: {message}")
 
 
-from topic_modeling.bertopic_container import *
-from topic_modeling.bertopic_model import *
-import numpy as np
+# from topic_modeling.bertopic_container import *
+# from topic_modeling.bertopic_model import *
+# import numpy as np
 
-# BERTOPIC_MODEL_PATH = check_env("BERTOPIC_MODEL_PATH")
-# bc = BertopicContainer.load(BERTOPIC_MODEL_PATH, em.ec.embeddings_model)
-# bm = BertopicModel(bc)
+# # BERTOPIC_MODEL_PATH = check_env("BERTOPIC_MODEL_PATH")
+# # bc = BertopicContainer.load(BERTOPIC_MODEL_PATH, em.ec.embeddings_model)
+# # bm = BertopicModel(bc)
 
-log.info("importing BERTopic and its dependencies")
-from bertopic import BERTopic
+# log.info("importing BERTopic and its dependencies")
+# from bertopic import BERTopic
 
-from umap import UMAP
-from hdbscan import HDBSCAN
-from sklearn.feature_extraction.text import CountVectorizer
-from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
+# from umap import UMAP
+# from hdbscan import HDBSCAN
+# from sklearn.feature_extraction.text import CountVectorizer
+# from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
 
-log.info("initializing BERTopic dependencies")
+# log.info("initializing BERTopic dependencies")
 
-umap_model = UMAP(
-    n_neighbors=15, # global / local view of the manifold default 15
-    n_components=5, # target dimensions default 5
-    metric='cosine',
-    min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
-)
+# umap_model = UMAP(
+#     n_neighbors=15, # global / local view of the manifold default 15
+#     n_components=5, # target dimensions default 5
+#     metric='cosine',
+#     min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
+# )
 
-hdbscan_model = HDBSCAN(
-    min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
-    metric='euclidean',
-    cluster_selection_method='eom',
-    prediction_data=True, # if we want to approximate clusters for new points
-)
+# hdbscan_model = HDBSCAN(
+#     min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
+#     metric='euclidean',
+#     cluster_selection_method='eom',
+#     prediction_data=True, # if we want to approximate clusters for new points
+# )
 
-vectorizer_model = CountVectorizer(
-    ngram_range=(1, 1),
-    stop_words='english',
-)
+# vectorizer_model = CountVectorizer(
+#     ngram_range=(1, 1),
+#     stop_words='english',
+# )
 
 
-# ps = PartOfSpeech("en_core_web_sm")
-mmr = MaximalMarginalRelevance(diversity=0.3)
+# # ps = PartOfSpeech("en_core_web_sm")
+# mmr = MaximalMarginalRelevance(diversity=0.3)
 
-# representation_model = [ps, mmr]
-representation_model = mmr
+# # representation_model = [ps, mmr]
+# representation_model = mmr
 
-bt = BERTopic(
-    embedding_model=em.ec.embeddings_model,
-    umap_model=umap_model,
-    hdbscan_model=hdbscan_model,
-    vectorizer_model=vectorizer_model,
-    representation_model=representation_model,
-    # verbose=True
-)
+# bt = BERTopic(
+#     embedding_model=em.ec.embeddings_model,
+#     umap_model=umap_model,
+#     hdbscan_model=hdbscan_model,
+#     vectorizer_model=vectorizer_model,
+#     representation_model=representation_model,
+#     # verbose=True
+# )
 
 import pandas as pd
 
@@ -420,7 +457,6 @@ def model_topics(docs):
       "topic": " ".join(d[1]),
       "count": d[0],
       "representative_articles": [],
-      "articles": [],
     })
 
   # add docs to topics
@@ -445,15 +481,12 @@ def model_topics(docs):
       "title": art["title"],
     }
     
-    topics[topic_ind]["articles"].append(art_duplicate)
-    
     # add representative doc
     if representative:
-      topics[topic_ind]["representative_articles"].append(docs[doc_ind]["_id"])
-
-    # TODO: instead of updating articles, add doc ids to topics
+      topics[topic_ind]["representative_articles"].append(art_duplicate)
 
     # update the article with duplicate of topic
+    # TODO: upsert with array item
     if "topics" not in docs[doc_ind]["analyzer"]: 
       docs[doc_ind]["analyzer"]["topics"] = []
     
@@ -467,7 +500,12 @@ def model_topics(docs):
   # insert the topics
   mr.store_docs(MONGO_DB_ANALYZER, "topics", topics)
 
+  # update docs in mongodb
+
+  # update docs in elasticsearch
+
   # TODO: insert into elasticsearch
+  # es.es.index(index="article_topics", )
 
   
 
@@ -502,7 +540,7 @@ if __name__ == '__main__':
   # mr.watch_collection(
   #   MONGO_DB_SCRAPER, 
   #   MONGO_COLLECTION_SCRAPER, 
-  #   1000, 
+  #   3000, 
   #   5, 
   #   processed_update_field="analyzer.processed", 
   #   callback=process
@@ -518,15 +556,18 @@ if __name__ == '__main__':
   #   callback=model_topics
   # )
 
-  p2 = Process(target=mr.watch_collection, args=(
-    MONGO_DB_ANALYZER, 
-    MONGO_COLLECTION_ANALYZER, 
-    3000, 
-    200, 
-    "topic_modeling.processed",
-    model_topics
-  ))
+  # p2 = Process(target=mr.watch_collection, args=(
+  #   MONGO_DB_ANALYZER, 
+  #   MONGO_COLLECTION_ANALYZER, 
+  #   3000, 
+  #   200, 
+  #   "topic_modeling.processed",
+  #   model_topics
+  # ))
 
-  p2.start()
+  # p2.start()
 
-  p2.join()
+  # p2.join()
+
+
+  rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
