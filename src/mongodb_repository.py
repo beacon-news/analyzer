@@ -12,9 +12,7 @@ class MongoRepository:
 
     try:
       self.__mc = MongoClient(host=host, port=port, uuidRepresentation='standard')
-      info = self.__mc.server_info()
-      self.log.info(f"connected to mongodb, host {host}, port {port}, server info {info}")
-  
+      self.log.info(f"connected to mongodb, host {host}, port {port}")
     except Exception:
       self.log.exception("failed to connect to mongodb")
       raise
@@ -99,6 +97,14 @@ class MongoRepository:
   #   except Exception:
   #     self.log.exception(f"error when inserting article into mongodb collection {collection_name}")
   #     raise
+
+  def get_batch(self, db_name: str, collection_name: str, ids: list[str]):
+    coll = self.get_collection(db_name, collection_name)
+    cursor = coll.find({"_id": { "$in": ids }})
+
+    # TODO: don't read all at once, use batches
+    return [doc for doc in cursor]
+
 
   def get_collection(self, db_name: str, collection_name: str) -> collection.Collection:
     try:

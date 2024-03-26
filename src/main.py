@@ -1,14 +1,14 @@
 import os
 import uuid
-import json
-from redis_handler import RedisHandler
-from mongodb_repository import MongoRepository
+from notification_consumer import *
 from classifier import CategoryClassifier, ModelContainer
 from embeddings import EmbeddingsModelContainer, EmbeddingsModel
 from ner import SpacyEntityRecognizer
 from utils import log_utils
 from article_store.elasticsearch_store import ElasticsearchStore
 from datetime import datetime
+from scraper_repository import *
+from analyzer_repository import *
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -42,7 +42,6 @@ MONGO_DB_SCRAPER = check_env('MONGO_DB_SCRAPER', 'scraper')
 MONGO_DB_ANALYZER = check_env('MONGO_DB_ANALYZER', 'analyzer')
 MONGO_COLLECTION_SCRAPER = check_env('MONGO_COLLECTION_SCRAPER', 'scraped_articles')
 MONGO_COLLECTION_ANALYZER = check_env('MONGO_COLLECTION_ANALYZER', 'scraped_articles')
-mr = MongoRepository(host=MONGO_HOST, port=MONGO_PORT)
 
 mc = ModelContainer.load(CAT_CLF_MODEL_PATH)
 clf = CategoryClassifier(mc)
@@ -60,7 +59,7 @@ ser = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
 #   not ELASTIC_TLS_INSECURE
 # )
 
-rh = RedisHandler(REDIS_HOST, REDIS_PORT)
+# rh = RedisHandler(REDIS_HOST, REDIS_PORT)
 
 
 def print_message(message):
@@ -70,37 +69,34 @@ def print_message(message):
 log = log_utils.create_console_logger("MessageProcessor")
 
 
-def process_notification(message: tuple[str, dict]):
+# TODO: use interfaces for better arch
 
-  # message
-  # (redis_id, {"done_meta": "[{'id': 'x', 'url': 'y'}]"})
-  # json string
+scraper_repo = MongoScraperRepository(
+  host=MONGO_HOST,
+  port=MONGO_PORT,
+  db_name=MONGO_DB_SCRAPER,
+  collection_name=MONGO_COLLECTION_SCRAPER,
+) 
 
-  meta_list = json.loads(message[1]["done_meta"])
-  ids = [m['id'] for m in meta_list]
+analyzer_repo = MongoAnalyzerRepository(
+  host=MONGO_HOST,
+  port=MONGO_PORT,
+  db_name=MONGO_DB_ANALYZER,
+  collection_name=MONGO_COLLECTION_ANALYZER,
+) 
 
-  # get the scraped batch from MongoDB
+def process_notification(message: dict):
 
-  coll = mr.get_collection(MONGO_DB_SCRAPER, MONGO_COLLECTION_SCRAPER)
-  limit = 200
+  ids = [m['id'] for m in message]
 
-  cursor = coll.find(
-    {
-      "_id": {
-        "$in": ids
-      }
-    }, 
-    limit=limit
-  )
-
-  docs = [doc for doc in cursor]
+  # get the scraped batch
+  docs = scraper_repo.get_article_batch(ids) 
   if len(docs) == 0:
     log.warning(f"no documents found in scraped batch, exiting")
     return
   
   # process the batch
   process(docs)
-
 
 
 def process(docs: list[dict]):
@@ -111,56 +107,14 @@ def process(docs: list[dict]):
   try: 
     for doc in docs:
 
-      if 'url' not in doc:
-        log.error(f"no 'url' in doc: {doc}, skipping analysis")
-        return
-      
-      url = doc['url']
-      if 'components' not in doc:
-        log.error(f"no 'components' in doc: {doc}, skipping analysis")
-        return
-      
-      comps = doc['components']
-      if 'article' not in comps:
-        log.error(f"'components.article' not found in doc: {doc}, skipping analysis")
-        return
-      
-      comps = comps['article']
-      if not isinstance(comps, list):
-        log.error(f"'components.article' is not an array: {doc}, skipping analysis")
-        return
-      
-      # should only contain 1 title, and 1 paragraphs section, but just in case
-      titles = [] 
-      paras = [] 
-      authors = []
-      publish_date = None
-      for component in comps:
-        if 'title' in component:
-          titles.append(component['title'])
-        elif 'paragraphs' in component:
-          if not isinstance(component['paragraphs'], list):
-            log.error(f"'components.article.paragraphs' is not an array: {doc}, skipping analysis")
-            return
-          paras.extend(component['paragraphs'])
-        elif 'author' in component:
-          authors.append(component['author'])
-        elif 'publish_date' in component:
-          publish_date = component['publish_date']
-          publish_date = datetime.fromisoformat(publish_date).replace(second=0, microsecond=0)
+      article = transform_doc(doc)
+      if article is None:
+        continue
 
-      # transform the scraped format into a more manageable one
-      article = {
-        "url": url,
-        "publish_date": publish_date,
-        "author": authors,
-        "title": titles,
-        "paragraphs": paras,
-      }
       transformed_docs.append(article)
 
       # extract text for analysis for each document
-      text = '\n'.join(titles) + '\n'.join(paras)
+      text = '\n'.join(article["title"]) + '\n'.join(article["paragraphs"])
       prepared_texts.append(text)
 
     # run analysis in batch
@@ -177,17 +131,14 @@ def process(docs: list[dict]):
     
     final_docs = [
       {
+        "analyze_time": datetime.now(),
         "analyzer": {
           "categories": art_labels,
           "entities": art_entities,
           "embeddings": art_embeddings,
         },
         "article": {
-          "url": article['url'],
-          "publish_date": article['publish_date'],
-          "author": article['author'],
-          "title": article['title'],
-          "paragraphs": article['paragraphs'],
+          **article
         }
       } for article, art_labels, art_embeddings, art_entities in zip(transformed_docs, labels, embeddings, entities)
     ]
@@ -203,33 +154,68 @@ def process(docs: list[dict]):
     # log.info(f"done storing batch of {len(final_docs)} articles in Elasticsearch")
 
     # store in mongodb
-    mr.store_articles(MONGO_DB_ANALYZER, MONGO_COLLECTION_ANALYZER, final_docs)
-    log.info(f"done storing batch of {len(final_docs)} articles in MongoDB")
-
-
-    # only print some embeddings
-    # p_a = analysis.copy()
-    # p_a['embeddings'] = p_a['embeddings'][:4]
-
-    # print("=================================")
-    # print(f"result: {json.dumps(transformed_docs, indent=2)}")
-    # print("********************************")
-    # print(f"result: {json.dumps(analyzed_docs, indent=2)}")
-    # print("=================================")
-    # print("")
-    
-    # p_a = analysis.copy()
-    # p_a['embeddings'] = p_a['embeddings'][:4]
-
-    # print("=================================")
-    # print(f"result: {json.dumps(article, indent=2)}")
-    # print("********************************")
-    # print(f"result: {json.dumps(p_a, indent=2)}")
-    # print("=================================")
-    # print("")
+    # mr.store_articles(MONGO_DB_ANALYZER, MONGO_COLLECTION_ANALYZER, final_docs)
+    analyzer_repo.store_article_batch(final_docs)
+    log.info(f"done analyzing batch of {len(final_docs)} articles")
 
   except Exception:
     log.exception(f"error trying to analyze doc: {doc}")
+
+
+def transform_doc(doc: dict) -> dict | None:
+  if 'id' not in doc:
+    log.error(f"no 'id' in doc: {doc}, skipping analysis")
+    return None
+  id = doc['id']
+
+  if 'url' not in doc:
+    log.error(f"no 'url' in doc: {doc}, skipping analysis")
+    return None
+  url = doc['url']
+
+  if 'components' not in doc:
+    log.error(f"no 'components' in doc: {doc}, skipping analysis")
+    return None
+  
+  comps = doc['components']
+  if 'article' not in comps:
+    log.error(f"'components.article' not found in doc: {doc}, skipping analysis")
+    return None
+  
+  comps = comps['article']
+  if not isinstance(comps, list):
+    log.error(f"'components.article' is not an array: {doc}, skipping analysis")
+    return None
+  
+  # should only contain 1 title, and 1 paragraphs section, but just in case
+  titles = [] 
+  paras = [] 
+  authors = []
+  publish_date = None
+  for component in comps:
+    if 'title' in component:
+      titles.append(component['title'])
+    elif 'paragraphs' in component:
+      if not isinstance(component['paragraphs'], list):
+        log.error(f"'components.article.paragraphs' is not an array: {doc}, skipping analysis")
+        return None
+      paras.extend(component['paragraphs'])
+    elif 'author' in component:
+      authors.append(component['author'])
+    elif 'publish_date' in component:
+      publish_date = component['publish_date']
+      publish_date = datetime.fromisoformat(publish_date).replace(second=0, microsecond=0)
+
+  # transform the scraped format into a more manageable one
+  return {
+    "id": id, 
+    "url": url,
+    "publish_date": publish_date,
+    "author": authors,
+    "title": titles,
+    "paragraphs": paras,
+  }
+
 
 def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[str]]]:
   # classify the text
@@ -242,98 +228,6 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
   entities = ser.ner_batch(texts)
 
   return (labels, embeddings.tolist(), entities)
-
-# def analyze(text) -> tuple[list[str], list[float], list[str]]:
-#   # classify the text
-#   labels = clf.predict(text)
-
-#   # create embeddings, take the first one as we only have 1 document
-#   embeddings = em.encode([text])[0]
-
-#   # get named entities
-#   entities = ser.ner(text)
-
-#   return (labels, embeddings.tolist(), entities)
-
-
-# def process(message):
-
-#   try: 
-#     content = json.loads(message[1]["article"])
-
-#     if 'url' not in content:
-#       log.error(f"no 'url' in message: {message}, skipping analysis")
-#       return
-    
-#     url = content['url']
-
-#     if 'components' not in content:
-#       log.error(f"no 'components' in message: {message}, skipping analysis")
-#       return
-    
-#     comps = content['components']
-#     if 'article' not in comps:
-#       log.error(f"'components.article' not found in message: {message}, skipping analysis")
-#       return
-    
-#     comps = comps['article']
-#     if not isinstance(comps, list):
-#       log.error(f"'components.article' is not an array: {message}, skipping analysis")
-#       return
-    
-#     # should only contain 1 title, and 1 paragraphs section, but just in case
-#     titles = [] 
-#     paras = [] 
-#     authors = []
-#     publish_date = None
-#     for component in comps:
-#       if 'title' in component:
-#         titles.append(component['title'])
-#       elif 'paragraphs' in component:
-#         if not isinstance(component['paragraphs'], list):
-#           log.error(f"'components.article.paragraphs' is not an array: {message}, skipping analysis")
-#           return
-#         paras.extend(component['paragraphs'])
-#       elif 'author' in component:
-#         authors.append(component['author'])
-#       elif 'publish_date' in component:
-#         publish_date = component['publish_date']
-
-#     # transform the scraped format into a more manageable one
-#     article = {
-#       "url": url,
-#       "publish_date": publish_date,
-#       "author": authors,
-#       "title": titles,
-#       "paragraphs": paras,
-#     }
-
-#     # run analysis on text block
-#     text = '\n'.join(titles) + '\n' + '\n'.join(paras)
-#     labels, embeddings, entities = analyze(text)
-#     analysis = {
-#       "categories": labels,
-#       "entities": entities,
-#       "embeddings": embeddings,
-#     }
-
-#     # store in elasticsearch
-#     es.store(article, analysis)
-
-#     # only print some embeddings
-#     p_a = analysis.copy()
-#     p_a['embeddings'] = p_a['embeddings'][:4]
-
-#     print("=================================")
-#     print(f"result: {json.dumps(article, indent=2)}")
-#     print("********************************")
-#     print(f"result: {json.dumps(p_a, indent=2)}")
-#     print("=================================")
-#     print("")
-
-#   except Exception:
-#     log.exception(f"error trying to analyze message: {message}")
-
 
 # from topic_modeling.bertopic_container import *
 # from topic_modeling.bertopic_model import *
@@ -570,4 +464,11 @@ if __name__ == '__main__':
   # p2.join()
 
 
-  rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
+  # rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
+
+  RedisNotificationConsumer(
+    REDIS_HOST, 
+    REDIS_PORT,
+    stream_name=REDIS_STREAM_NAME,
+    consumer_group=REDIS_CONSUMER_GROUP
+  ).consume(process_notification)
