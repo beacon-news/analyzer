@@ -9,6 +9,7 @@ from article_store.elasticsearch_store import ElasticsearchStore
 from datetime import datetime
 from scraper_repository import *
 from analyzer_repository import *
+from notifier import *
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -85,9 +86,17 @@ analyzer_repo = MongoAnalyzerRepository(
   collection_name=MONGO_COLLECTION_ANALYZER,
 ) 
 
+notifier = RedisStreamsNotifier(
+  REDIS_HOST,
+  REDIS_PORT,
+  stream_name="analyzer_articles",
+)
+
 def process_notification(message: dict):
 
   ids = [m['id'] for m in message]
+  
+  # TODO: use Processes and a process pool executor
 
   # get the scraped batch
   docs = scraper_repo.get_article_batch(ids) 
@@ -95,11 +104,18 @@ def process_notification(message: dict):
     log.warning(f"no documents found in scraped batch, exiting")
     return
   
+  results = []
+
   # process the batch
-  process(docs)
+  process(docs, results)
+
+  log.info(f"processed {len(results)} elements: {results}")
+
+  # send a notification that we're done
+  notifier.send_done_notification(results)
 
 
-def process(docs: list[dict]):
+def process(docs: list[dict], results=list):
 
   transformed_docs = []
   prepared_texts = []
@@ -153,10 +169,10 @@ def process(docs: list[dict]):
     # es.store_batch(es_docs)
     # log.info(f"done storing batch of {len(final_docs)} articles in Elasticsearch")
 
-    # store in mongodb
-    # mr.store_articles(MONGO_DB_ANALYZER, MONGO_COLLECTION_ANALYZER, final_docs)
-    analyzer_repo.store_article_batch(final_docs)
+    ids = analyzer_repo.store_article_batch(final_docs)
     log.info(f"done analyzing batch of {len(final_docs)} articles")
+
+    results.extend(ids)
 
   except Exception:
     log.exception(f"error trying to analyze doc: {doc}")

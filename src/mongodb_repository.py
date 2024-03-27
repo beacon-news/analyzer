@@ -117,25 +117,25 @@ class MongoRepository:
       self.log.exception(f"error while asserting database {db_name} and collection {collection_name}")
       raise
 
+  # def store_articles(self, db_name: str, collection_name: str, articles: list[dict]):
+  #   coll = self.get_collection(db_name, collection_name)
     
-  def store_articles(self, db_name: str, collection_name: str, articles: list[dict]):
-    coll = self.get_collection(db_name, collection_name)
-    
-    try:
-      res = coll.insert_many(articles)
-      self.log.info(f"inserted {len(articles)} articles into collection {collection_name}")
-      self.log.debug(f"inserted ids {res.inserted_ids}")
-    except Exception:
-      self.log.exception(f"error when inserting articles into mongodb collection {collection_name}")
-      raise
+  #   try:
+  #     res = coll.insert_many(articles)
+  #     self.log.info(f"inserted {len(articles)} articles into collection {collection_name}")
+  #     self.log.debug(f"inserted ids {res.inserted_ids}")
+  #   except Exception:
+  #     self.log.exception(f"error when inserting articles into mongodb collection {collection_name}")
+  #     raise
 
-  def store_docs(self, db_name: str, collection_name: str, docs: list[dict]):
+  def store_docs(self, db_name: str, collection_name: str, docs: list[dict]) -> list:
     coll = self.get_collection(db_name, collection_name)
     
     try:
       res = coll.insert_many(docs)
       self.log.info(f"inserted {len(docs)} documents into collection {collection_name}")
       self.log.debug(f"inserted ids {res.inserted_ids}")
+      return res.inserted_ids
     except Exception:
       self.log.exception(f"error when inserting documents into mongodb collection {collection_name}")
       raise

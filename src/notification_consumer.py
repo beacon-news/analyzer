@@ -20,9 +20,8 @@ class RedisNotificationConsumer(NotificationConsumer):
   
   def consume(self, callback, *callback_args) -> None:
 
-    def process_wrapper(message: tuple[str, dict]):
-      msg = json.loads(message[1]["done_meta"])
-      p = mp.Process(target=callback, args=(msg, *callback_args))
-      p.start()
+    def message_extractor_wrapper(message: tuple[str, dict]):
+      msg = json.loads(message[1]["done"])
+      callback(msg, *callback_args)
       
-    self.rh.consume_stream(self.stream_name, self.consumer_group, process_wrapper)
+    self.rh.consume_stream(self.stream_name, self.consumer_group, message_extractor_wrapper)

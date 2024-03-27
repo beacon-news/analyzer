@@ -1,4 +1,5 @@
 import redis
+import redis.exceptions
 import uuid
 import time
 from random import randint
@@ -12,9 +13,13 @@ class RedisHandler:
     self.log = log_utils.create_console_logger(
       self.__class__.__name__,
     )
+    self.host = redis_host
+    self.port = redis_port
+    self.__connect()
 
+  def __connect(self):
     # TODO: redis cluster connection
-    self.r = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+    self.r = redis.Redis(host=self.host, port=self.port, decode_responses=True)
 
     backoff = randint(500, 1000)
     while not self.r.ping():
@@ -61,9 +66,12 @@ class RedisHandler:
           block=xread_timeout,
           count=xread_count
         )
+      except redis.exceptions.ConnectionError:
+        # try to connect again
+        self.__connect()
       except Exception:
-        self.log.exception("error while consuming message")
-        continue
+        self.log.exception("unknown error while consuming message")
+        return
       except KeyboardInterrupt:
         self.log.info("shutting down consumer, waiting for autoclaim thread to finish")
         autoclaim_exit.set() 
@@ -84,7 +92,13 @@ class RedisHandler:
       # consume the messages, either pending or new
       for message in messages[0][1]:
         try:
+
+          # process the message
+          callback(message, *callback_args)
+          self.log.debug(f"processed message {message}")
+
           self.r.xack(stream_name, consumer_group, message[0])
+          self.log.debug(f"ack-d message {message}")
           last_id = message[0]
 
           if was_pending:
@@ -92,15 +106,11 @@ class RedisHandler:
           else:
             self.log.debug(f"consumed message {message}")
 
-          # process the message
-          callback(message, *callback_args)
-
           # TODO: decide on this
           # do we want to delete?
           # we might only want to regularly trim, or use a capped stream
           # self.r.xdel(stream_name, message[0])
-
-          self.log.debug(f"processed message {message}")
+          # self.log.debug(f"deleted message {message}")
 
         except Exception:
           self.log.exception("error while processing message")
