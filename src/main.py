@@ -52,13 +52,13 @@ em = EmbeddingsModel(ec)
 
 ser = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
 
-# es = ElasticsearchStore(
-#   ELASTIC_CONN, 
-#   ELASTIC_USER, 
-#   ELASTIC_PASSWORD, 
-#   ELASTIC_CA_PATH, 
-#   not ELASTIC_TLS_INSECURE
-# )
+es = ElasticsearchStore(
+  ELASTIC_CONN, 
+  ELASTIC_USER, 
+  ELASTIC_PASSWORD, 
+  ELASTIC_CA_PATH, 
+  not ELASTIC_TLS_INSECURE
+)
 
 # rh = RedisHandler(REDIS_HOST, REDIS_PORT)
 
@@ -112,7 +112,7 @@ def process_notification(message: dict):
   log.info(f"processed {len(results)} elements: {results}")
 
   # send a notification that we're done
-  notifier.send_done_notification(results)
+  # notifier.send_done_notification(results)
 
 
 def process(docs: list[dict], results=list):
@@ -166,11 +166,11 @@ def process(docs: list[dict], results=list):
       es_docs.append(doc)
     
     # store in elasticsearch
-    # es.store_batch(es_docs)
-    # log.info(f"done storing batch of {len(final_docs)} articles in Elasticsearch")
+    ids = es.store_article_batch(es_docs)
+    log.info(f"done storing batch of {len(final_docs)} articles in Elasticsearch")
 
-    ids = analyzer_repo.store_article_batch(final_docs)
-    log.info(f"done analyzing batch of {len(final_docs)} articles")
+    # ids = analyzer_repo.store_article_batch(final_docs)
+    # log.info(f"done analyzing batch of {len(final_docs)} articles")
 
     results.extend(ids)
 
@@ -247,56 +247,55 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
 
 # from topic_modeling.bertopic_container import *
 # from topic_modeling.bertopic_model import *
-# import numpy as np
+import numpy as np
 
 # # BERTOPIC_MODEL_PATH = check_env("BERTOPIC_MODEL_PATH")
 # # bc = BertopicContainer.load(BERTOPIC_MODEL_PATH, em.ec.embeddings_model)
 # # bm = BertopicModel(bc)
 
-# log.info("importing BERTopic and its dependencies")
-# from bertopic import BERTopic
+log.info("importing BERTopic and its dependencies")
+from bertopic import BERTopic
 
-# from umap import UMAP
-# from hdbscan import HDBSCAN
-# from sklearn.feature_extraction.text import CountVectorizer
-# from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
+from umap import UMAP
+from hdbscan import HDBSCAN
+from sklearn.feature_extraction.text import CountVectorizer
+from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
 
-# log.info("initializing BERTopic dependencies")
+log.info("initializing BERTopic dependencies")
 
-# umap_model = UMAP(
-#     n_neighbors=15, # global / local view of the manifold default 15
-#     n_components=5, # target dimensions default 5
-#     metric='cosine',
-#     min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
-# )
+umap_model = UMAP(
+    n_neighbors=15, # global / local view of the manifold default 15
+    n_components=5, # target dimensions default 5
+    metric='cosine',
+    min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
+)
 
-# hdbscan_model = HDBSCAN(
-#     min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
-#     metric='euclidean',
-#     cluster_selection_method='eom',
-#     prediction_data=True, # if we want to approximate clusters for new points
-# )
+hdbscan_model = HDBSCAN(
+    min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
+    metric='euclidean',
+    cluster_selection_method='eom',
+    prediction_data=True, # if we want to approximate clusters for new points
+)
 
-# vectorizer_model = CountVectorizer(
-#     ngram_range=(1, 1),
-#     stop_words='english',
-# )
+vectorizer_model = CountVectorizer(
+    ngram_range=(1, 1),
+    stop_words='english',
+)
 
+# ps = PartOfSpeech("en_core_web_sm")
+mmr = MaximalMarginalRelevance(diversity=0.3)
 
-# # ps = PartOfSpeech("en_core_web_sm")
-# mmr = MaximalMarginalRelevance(diversity=0.3)
+# representation_model = [ps, mmr]
+representation_model = mmr
 
-# # representation_model = [ps, mmr]
-# representation_model = mmr
-
-# bt = BERTopic(
-#     embedding_model=em.ec.embeddings_model,
-#     umap_model=umap_model,
-#     hdbscan_model=hdbscan_model,
-#     vectorizer_model=vectorizer_model,
-#     representation_model=representation_model,
-#     # verbose=True
-# )
+bt = BERTopic(
+    embedding_model=em.ec.embeddings_model,
+    umap_model=umap_model,
+    hdbscan_model=hdbscan_model,
+    vectorizer_model=vectorizer_model,
+    representation_model=representation_model,
+    # verbose=True
+)
 
 import pandas as pd
 
@@ -379,36 +378,43 @@ def model_topics(docs):
     doc_df_dict["Topic"].values(), 
     doc_df_dict["Representative_document"].values()
   ):
-
-    # add duplicate of article to topic
-    art = docs[doc_ind]["article"]
-
-    art_duplicate = {
-      "_id": docs[doc_ind]["_id"],
-      "url": art["url"],
-      "publish_date": art["publish_date"],
-      "author": art["author"],
-      "title": art["title"],
-    }
     
     # add representative doc
     if representative:
+
+      # add duplicate of article to topic
+      art = docs[doc_ind]["article"]
+      art_duplicate = {
+        "_id": docs[doc_ind]["_id"],
+        "url": art["url"],
+        "publish_date": art["publish_date"],
+        "author": art["author"],
+        "title": art["title"],
+      }
       topics[topic_ind]["representative_articles"].append(art_duplicate)
 
     # update the article with duplicate of topic
     # TODO: upsert with array item
-    if "topics" not in docs[doc_ind]["analyzer"]: 
-      docs[doc_ind]["analyzer"]["topics"] = []
+    # if "topics" not in docs[doc_ind]["analyzer"]: 
+    #   docs[doc_ind]["analyzer"]["topics"] = []
     
-    docs[doc_ind]["analyzer"]["topics"].append(
-      {
-        "_id": topics[topic_ind]["_id"],
-        "topic": topics[topic_ind]["topic"],
-      }
-    )
+    # docs[doc_ind]["analyzer"]["topics"].append(
+    #   {
+    #     "_id": topics[topic_ind]["_id"],
+    #     "topic": topics[topic_ind]["topic"],
+    #   }
+    # )
+
+    es_topic = {
+      "id": topics[topic_ind]["_id"],
+      "topic": topics[topic_ind]["topic"],
+    }
+    es.update_article_topic(docs[doc_ind]["_id"], es_topic)
   
   # insert the topics
-  mr.store_docs(MONGO_DB_ANALYZER, "topics", topics)
+  # mr.store_docs(MONGO_DB_ANALYZER, "topics", topics)
+  es.store_topic_batch(topics)
+  
 
   # update docs in mongodb
 
