@@ -360,7 +360,7 @@ def model_topics(docs):
   topic_df_dict = topic_info.loc[topic_info["Topic"] != -1, ["Count", "Representation"]].to_dict()
   for d in zip(topic_df_dict["Count"].values(), topic_df_dict["Representation"].values()):
     topics.append({
-      "_id": uuid.uuid4(), 
+      "_id": uuid.uuid4().hex, 
       "start_time": start_time,
       "end_time": end_time,
       "topic": " ".join(d[1]),
@@ -488,9 +488,32 @@ if __name__ == '__main__':
 
   # rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
 
-  RedisNotificationConsumer(
-    REDIS_HOST, 
-    REDIS_PORT,
-    stream_name=REDIS_STREAM_NAME,
-    consumer_group=REDIS_CONSUMER_GROUP
-  ).consume(process_notification)
+  # RedisNotificationConsumer(
+  #   REDIS_HOST, 
+  #   REDIS_PORT,
+  #   stream_name=REDIS_STREAM_NAME,
+  #   consumer_group=REDIS_CONSUMER_GROUP
+  # ).consume(process_notification)
+
+
+  docs = es.es.search(
+    index="articles",
+    query={
+      "match_all": {}
+    }, 
+  )
+
+  dt = [{
+    "_id": d["_id"],
+    "analyzer": {
+      "embeddings": d["_source"]["analyzer"]["embeddings"],
+    },
+    "article": {
+      **d["_source"]["article"],
+    }
+  } for d in docs["hits"]["hits"]]
+
+
+  print(dt)
+
+  model_topics(dt)

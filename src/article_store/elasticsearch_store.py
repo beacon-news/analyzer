@@ -35,10 +35,21 @@ class ElasticsearchStore:
       self.log.info(f"creating/asserting index '{self.index_name}'")
       self.es.indices.create(index=self.index_name, mappings={
         "properties": {
+          "topics": {
+            "properties": {
+              "topic_ids": {
+                "type": "keyword"
+              },
+              "topic_names": {
+                "type": "text"
+              }
+            }
+          },
           "analyzer": {
             "properties": {
               "categories": {
                 "type": "text",
+                # TODO: remove keyword mapping? it doesn't do much...
                 "fields": {
                   "keyword": {
                     "type": "keyword",
@@ -110,7 +121,7 @@ class ElasticsearchStore:
   def store_topic_batch(self, topics: list[dict]) -> list[str]:
     topics_index = "topics"
     ids = []
-    self.log.info(f"attempting to insert {len(topics)} articles in {topics_index}")
+    self.log.info(f"attempting to insert {len(topics)} docs in {topics_index}")
     for ok, action in helpers.streaming_bulk(self.es, self.__generate_topic_actions(topics_index, topics)):
       if not ok:
         self.log.error(f"failed to bulk store topic: {action}")
@@ -129,9 +140,23 @@ class ElasticsearchStore:
       yield action
   
   def update_article_topic(self, id: str, topic: dict):
+    # TODO: use this a compiled script
     self.es.update(index=self.index_name, id=id, body={
       "script": {
-        "source": "if (!ctx._source.analyzer.topic_ids.contains(params.topic_id)) { ctx._source.analyzer.topic_ids.add(params.topic_id) }; if (!ctx._source.analyzer.topics.contains(params.topic)) { ctx._source.analyzer.topics.add(params.topic) }",
+        "source": """
+        if (ctx._source.topics == null) {
+          ctx._source.topics = [
+            'topic_ids': [],
+            'topic_names': []
+          ]
+        }
+        if (!ctx._source.topics.topic_ids.contains(params.topic_id)) { 
+          ctx._source.topics.topic_ids.add(params.topic_id) 
+        } 
+        if (!ctx._source.topics.topic_names.contains(params.topic)) { 
+          ctx._source.topics.topic_names.add(params.topic) 
+        }
+        """,
         "params": {
           "topic_id": topic["id"],
           "topic": topic["topic"],
