@@ -10,16 +10,18 @@ from typing import Callable
 from utils import log_utils
 
 
-def job_func():
-  print("Hello world")
+# WARNING: this changes sys.argv
+def start_process(log, target_func, sys_argv=[]):
+  # hacky way to set cli args for every process
+  sys.argv = sys_argv
 
-def start_process(target_func):
   # TODO: fire and forget, shouldn't we check periodically if the process finished?
-  print(f"{datetime.now().isoformat()}: starting new process with callable {target_func}")
+  log.info(f"{datetime.now().isoformat()}: starting new process with callable {target_func}")
   proc = mp.Process(target=target_func)
   proc.start()
 
 def get_callable(callable_str: str) -> Callable:
+  # TODO: do this part in the process, don't load modules into memory here
   callable_l = callable_str.split(':')
   if len(callable_l) != 2:
     raise ValueError(f"Invalid callable string '{callable_str}', must have the form module:callable (e.g. 'main:do_stuff')")
@@ -83,21 +85,21 @@ if __name__ == '__main__':
     exit(1)
 
   config_path = sys.argv[1]
-  ending = config_path.split('.')[-1]
 
   with open(config_path) as f:
-    if ending == "json":
+    if config_path.endswith(".json"):
       config = json.load(f)
-    elif ending == "yaml" or ending == "yml":
+    elif config_path.endswith(".yaml") or config_path.endswith(".yml"):
       config = yaml.safe_load(f)
 
   for job_config in config['jobs']:
     callable_str: str = job_config['callable']
     func = get_callable(callable_str) 
+    args = job_config.get('args', [])
 
     for sched_str in job_config['schedule']:
       job = create_schedule_job(sched_str)
-      job.do(func)
+      job.do(start_process, log, func, args)
       log.info(f"scheduled job: {sched_str} - {callable_str}")
 
   while True:
@@ -107,51 +109,3 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
       log.info(f"stopping scheduler, no new jobs will be started, existing jobs will finish")
       exit(0)
-
-
-  # parse config (cron string + query)
-  date_min = datetime.fromtimestamp(0).isoformat()
-  date_max = datetime.now().isoformat()
-
-  q = {
-    "publish_date": {
-      "from": date_min,
-      "to": date_max,
-    },
-  }
-
-  # transform query in config to db query
-  query = {
-    "bool": {
-      "filter": {
-        "range": {
-          "article.publish_date": {
-            "gte": q["publish_date"]["from"],
-            "lte": q["publish_date"]["to"],
-          }
-        }
-      }
-    }
-  }
-
-  log.info(f"running topic modeling with config {q}")
-
-  # query the db, only what is needed
-  docs = es.es.search(
-    index="articles",
-    query=query,
-  )
-
-  # transform 
-  dt = [{
-    "_id": d["_id"],
-    "analyzer": {
-      "embeddings": d["_source"]["analyzer"]["embeddings"],
-    },
-    "article": {
-      **d["_source"]["article"],
-    }
-  } for d in docs["hits"]["hits"]]
-
-  # run topic modeling, insert topics into db, update documents with topics
-  model_topics(dt)

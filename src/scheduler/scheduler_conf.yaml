@@ -1,0 +1,14 @@
+jobs: 
+- callable: scheduler:job_func
+  schedule:
+  # - every(5).minutes
+  - every(10).seconds
+
+- callable: scheduler:cli
+  args: 
+  #  - cli --opt some
+  - cli
+  - --opt
+  - some
+  schedule:
+  - every(2).seconds

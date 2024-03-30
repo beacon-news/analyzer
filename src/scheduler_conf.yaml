@@ -1,5 +1,0 @@
-jobs: 
-  - callable: scheduler:job_func
-    schedule:
-      - every(5).minutes
-      - every(3).seconds

@@ -1,8 +1,14 @@
 from utils import log_utils
 from article_store.elasticsearch_store import ElasticsearchStore
 import os
+import sys
+import json
+import yaml
 import hashlib
-import schedule
+from datetime import datetime
+import pydantic
+import re
+from dateutil.relativedelta import relativedelta
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -32,7 +38,6 @@ log.info("importing BERTopic and its dependencies")
 from embeddings.embeddings_container import EmbeddingsModelContainer
 from embeddings.embeddings_model import EmbeddingsModel
 from datetime import datetime
-import uuid
 import numpy as np
 from bertopic import BERTopic
 from umap import UMAP
@@ -219,49 +224,112 @@ def model_topics(docs):
 
 
 
-if __name__ == '__main__':
 
-  # script creates crontab entries for itself?
+class PublishDateQuery(pydantic.BaseModel):
+  start: datetime
+  end: datetime 
 
-  # runs a loop in the background and starts new processes?
+  @pydantic.field_validator("start", "end", mode="before")
+  def parse_date_str(date_str: str) -> datetime:
+    try:
+      dt = datetime.fromisoformat(date_str)
+    except Exception:
+      # try to parse relative string
+      if len(re.findall(r'^now(-[0-9]+(d|w|m|y))?$', date_str)) == 0:
+        raise ValueError(f"invalid date string: {date_str}")
+      
+      if date_str == 'now':
+        return datetime.now()
 
-  # minute hour day(of month) month day(day of week)
+      # strip the 'now-'
+      date_str = date_str[4:]
+      
+      # get the number
+      m = re.match(r'[0-9]+', date_str)
+      s = m.span()
+      num = int(date_str[s[0]:s[1]])
+      
+      # parse the unit
+      date_str = date_str[s[1]:]
+      dt = datetime.now()
+      if date_str == 'd':
+        dt -= relativedelta(days=num)
+      elif date_str == 'w':
+        dt -= relativedelta(weeks=num)
+      elif date_str == 'm':
+        dt -= relativedelta(months=num)
+      elif date_str == 'y':
+        dt -= relativedelta(years=num)
 
-  import sys
-
-  cron_str = sys.argv[1]
-
-  elems = cron_str.split(' ')
-  if len(elems) != 5:
-    raise ValueError(f"Invalid cron string {cron_str}, it has {len(elems)} values")
-
-
-  print(elems)
+    return dt
   
-  exit(0)
+  @pydantic.model_validator(mode="after")
+  def valid_dates(self):
+    if self.start > self.end:
+      raise ValueError(f"start date {self.start} is after end date {self.end}")
+    return self
 
-  # schedule.every()
+
+class QueryConfig(pydantic.BaseModel):
+  publish_date: PublishDateQuery 
 
 
-  # parse config (cron string + query)
-  date_min = datetime.fromtimestamp(0).isoformat()
-  date_max = datetime.now().isoformat()
+def parse_date_str(date_str: str) -> datetime:
+  try:
+    dt = datetime.fromisoformat(date_str)
+  except Exception:
+    # try to parse relative string
+    if re.match(r'now-[0-9]+(d|w|m|y)', date_str) is None:
+      raise ValueError(f"invalid date string: {date_str}")
 
-  q = {
-    "publish_date": {
-      "from": date_min,
-      "to": date_max,
-    },
-  }
+    # strip the 'now-'
+    date_str = date_str[4:]
+    
+    # get the number
+    m = re.match(r'[0-9]+', date_str)
+    s = m.span()
+    num = int(date_str[s[0]:s[1]])
+    
+    # parse the unit
+    date_str = date_str[s[1]:]
+    dt = datetime.now()
+    if date_str == 'd':
+      dt -= relativedelta(days=num)
+    elif date_str == 'w':
+      dt -= relativedelta(weeks=num)
+    elif date_str == 'm':
+      dt -= relativedelta(months=num)
+    elif date_str == 'y':
+      dt -= relativedelta(years=num)
+
+  return dt
+  
+
+
+def run_topic_modeling():
+  if len(sys.argv) != 2:
+    print(f"usage: {sys.argv[0]} <config_path>")
+    exit(1)
+
+  config_path = sys.argv[1]
+
+  with open(config_path) as f:
+    if config_path.endswith(".json"):
+      config = json.load(f)
+    elif config_path.endswith(".yaml") or config_path.endswith(".yml"):
+      config = yaml.safe_load(f)
+
+  print(config)
+  q = QueryConfig(**config)
 
   # transform query in config to db query
-  query = {
+  es_query = {
     "bool": {
       "filter": {
         "range": {
           "article.publish_date": {
-            "gte": q["publish_date"]["from"],
-            "lte": q["publish_date"]["to"],
+            "gte": q.publish_date.start.isoformat(),
+            "lte": q.publish_date.end.isoformat(),
           }
         }
       }
@@ -273,7 +341,8 @@ if __name__ == '__main__':
   # query the db, only what is needed
   docs = es.es.search(
     index="articles",
-    query=query,
+    query=es_query,
+    source=["_id", "analyzer.embeddings", "article"]
   )
 
   # transform 
@@ -289,3 +358,6 @@ if __name__ == '__main__':
 
   # run topic modeling, insert topics into db, update documents with topics
   model_topics(dt)
+
+if __name__ == '__main__':
+  run_topic_modeling()

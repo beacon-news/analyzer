@@ -1,0 +1,7 @@
+jobs: 
+- callable: topics_main:run_topic_modeling
+  args:
+  - src/topic_modeling/query_conf.yaml 
+  schedule:
+  # - every(5).minutes
+  - every(2).minutes
