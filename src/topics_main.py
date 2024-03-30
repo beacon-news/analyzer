@@ -2,6 +2,7 @@ from utils import log_utils
 from article_store.elasticsearch_store import ElasticsearchStore
 import os
 import hashlib
+import schedule
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -223,6 +224,23 @@ if __name__ == '__main__':
   # script creates crontab entries for itself?
 
   # runs a loop in the background and starts new processes?
+
+  # minute hour day(of month) month day(day of week)
+
+  import sys
+
+  cron_str = sys.argv[1]
+
+  elems = cron_str.split(' ')
+  if len(elems) != 5:
+    raise ValueError(f"Invalid cron string {cron_str}, it has {len(elems)} values")
+
+
+  print(elems)
+  
+  exit(0)
+
+  # schedule.every()
 
 
   # parse config (cron string + query)
