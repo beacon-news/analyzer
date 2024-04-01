@@ -1,42 +1,21 @@
-import importlib
 import schedule
+import subprocess as sp
+import shlex
+import os
 import sys
 import time
 import yaml
 import json
-import multiprocessing as mp
 from datetime import datetime
-from typing import Callable
 from utils import log_utils
 
+def detach_from_parent():
+  os.setpgrp()
 
-# WARNING: this changes sys.argv
-def start_process(log, target_func, sys_argv=[]):
-  # hacky way to set cli args for every process
-  sys.argv = sys_argv
-
+def spawn_process(log, args, env): 
   # TODO: fire and forget, shouldn't we check periodically if the process finished?
-  log.info(f"{datetime.now().isoformat()}: starting new process with callable {target_func}")
-  proc = mp.Process(target=target_func)
-  proc.start()
-
-def get_callable(callable_str: str) -> Callable:
-  # TODO: do this part in the process, don't load modules into memory here
-  callable_l = callable_str.split(':')
-  if len(callable_l) != 2:
-    raise ValueError(f"Invalid callable string '{callable_str}', must have the form module:callable (e.g. 'main:do_stuff')")
-
-  module_str, func_str = callable_l
-  module = importlib.import_module(module_str)
-
-  if not hasattr(module, func_str):
-    raise ValueError(f"Module {module_str} doesn't have callable {func_str}")
-
-  func = getattr(module, func_str)
-  if not callable(func):
-    raise ValueError(f"{func_str} is not callable on module {module_str}")
-  
-  return func
+  log.info(f"{datetime.now().isoformat()}: starting new process with args: {args}")
+  sp.Popen(args=args, env=env, preexec_fn=detach_from_parent)
 
 # creates a 'schedule' Job from a string which looks like it's interface
 # this is possible thanks to it's fluent interface
@@ -91,16 +70,19 @@ if __name__ == '__main__':
       config = json.load(f)
     elif config_path.endswith(".yaml") or config_path.endswith(".yml"):
       config = yaml.safe_load(f)
-
+    
   for job_config in config['jobs']:
-    callable_str: str = job_config['callable']
-    func = get_callable(callable_str) 
-    args = job_config.get('args', [])
+    # parse command into list of system arguments
+    cmd = job_config.get("cmd")
+    args = shlex.split(cmd)
+
+    # add any environment variables
+    env = os.environ.copy() | job_config.get("env", {})
 
     for sched_str in job_config['schedule']:
       job = create_schedule_job(sched_str)
-      job.do(start_process, log, func, args)
-      log.info(f"scheduled job: {sched_str} - {callable_str}")
+      job.do(spawn_process, log, args, env)
+      log.info(f"scheduled job: {sched_str} - {cmd}")
 
   while True:
     try:

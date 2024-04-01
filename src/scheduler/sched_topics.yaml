@@ -1,7 +1,5 @@
 jobs: 
-- callable: topics_main:run_topic_modeling
-  args:
-  - src/topic_modeling/query_conf.yaml 
+- cmd: ./run.sh python src/topics_main.py src/topic_modeling/query_conf.yaml 
   schedule:
   # - every(5).minutes
   - every(2).minutes
