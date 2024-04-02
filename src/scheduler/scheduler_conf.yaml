@@ -1,7 +1,0 @@
-jobs: 
-- cmd: ./test.sh arg1 arg2 
-  env: 
-    FOO: Bar
-  schedule:
-  # - every(5).minutes
-  - every(10).seconds

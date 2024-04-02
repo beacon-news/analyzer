@@ -1,5 +1,4 @@
 import os
-import uuid
 from notification_consumer import *
 from classifier import CategoryClassifier, ModelContainer
 from embeddings import EmbeddingsModelContainer, EmbeddingsModel
@@ -40,9 +39,9 @@ ELASTIC_TLS_INSECURE = bool(check_env('ELASTIC_TLS_INSECURE', False))
 MONGO_HOST = check_env('MONGO_HOST', 'localhost')
 MONGO_PORT = int(check_env('MONGO_PORT', 27017))
 MONGO_DB_SCRAPER = check_env('MONGO_DB_SCRAPER', 'scraper')
-MONGO_DB_ANALYZER = check_env('MONGO_DB_ANALYZER', 'analyzer')
+# MONGO_DB_ANALYZER = check_env('MONGO_DB_ANALYZER', 'analyzer')
 MONGO_COLLECTION_SCRAPER = check_env('MONGO_COLLECTION_SCRAPER', 'scraped_articles')
-MONGO_COLLECTION_ANALYZER = check_env('MONGO_COLLECTION_ANALYZER', 'scraped_articles')
+# MONGO_COLLECTION_ANALYZER = check_env('MONGO_COLLECTION_ANALYZER', 'scraped_articles')
 
 mc = ModelContainer.load(CAT_CLF_MODEL_PATH)
 clf = CategoryClassifier(mc)
@@ -60,15 +59,14 @@ es = ElasticsearchStore(
   not ELASTIC_TLS_INSECURE
 )
 
-# rh = RedisHandler(REDIS_HOST, REDIS_PORT)
+rh = RedisHandler(REDIS_HOST, REDIS_PORT)
 
 
 def print_message(message):
   print(f"received from stream: {message}")
 
 
-log = log_utils.create_console_logger("MessageProcessor")
-
+log = log_utils.create_console_logger("Analyzer")
 
 # TODO: use interfaces for better arch
 
@@ -79,12 +77,12 @@ scraper_repo = MongoScraperRepository(
   collection_name=MONGO_COLLECTION_SCRAPER,
 ) 
 
-analyzer_repo = MongoAnalyzerRepository(
-  host=MONGO_HOST,
-  port=MONGO_PORT,
-  db_name=MONGO_DB_ANALYZER,
-  collection_name=MONGO_COLLECTION_ANALYZER,
-) 
+# analyzer_repo = MongoAnalyzerRepository(
+#   host=MONGO_HOST,
+#   port=MONGO_PORT,
+#   db_name=MONGO_DB_ANALYZER,
+#   collection_name=MONGO_COLLECTION_ANALYZER,
+# ) 
 
 notifier = RedisStreamsNotifier(
   REDIS_HOST,
@@ -110,9 +108,6 @@ def process_notification(message: dict):
   process(docs, results)
 
   log.info(f"processed {len(results)} elements: {results}")
-
-  # send a notification that we're done
-  # notifier.send_done_notification(results)
 
 
 def process(docs: list[dict], results=list):
@@ -168,9 +163,6 @@ def process(docs: list[dict], results=list):
     # store in elasticsearch
     ids = es.store_article_batch(es_docs)
     log.info(f"done storing batch of {len(final_docs)} articles in Elasticsearch")
-
-    # ids = analyzer_repo.store_article_batch(final_docs)
-    # log.info(f"done analyzing batch of {len(final_docs)} articles")
 
     results.extend(ids)
 
@@ -245,275 +237,214 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
 
   return (labels, embeddings.tolist(), entities)
 
-# from topic_modeling.bertopic_container import *
-# from topic_modeling.bertopic_model import *
-import numpy as np
+# # from topic_modeling.bertopic_container import *
+# # from topic_modeling.bertopic_model import *
+# import numpy as np
 
-# # BERTOPIC_MODEL_PATH = check_env("BERTOPIC_MODEL_PATH")
-# # bc = BertopicContainer.load(BERTOPIC_MODEL_PATH, em.ec.embeddings_model)
-# # bm = BertopicModel(bc)
+# # # BERTOPIC_MODEL_PATH = check_env("BERTOPIC_MODEL_PATH")
+# # # bc = BertopicContainer.load(BERTOPIC_MODEL_PATH, em.ec.embeddings_model)
+# # # bm = BertopicModel(bc)
 
-log.info("importing BERTopic and its dependencies")
-from bertopic import BERTopic
+# log.info("importing BERTopic and its dependencies")
+# from bertopic import BERTopic
 
-from umap import UMAP
-from hdbscan import HDBSCAN
-from sklearn.feature_extraction.text import CountVectorizer
-from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
+# from umap import UMAP
+# from hdbscan import HDBSCAN
+# from sklearn.feature_extraction.text import CountVectorizer
+# from bertopic.representation import PartOfSpeech, MaximalMarginalRelevance
 
-log.info("initializing BERTopic dependencies")
+# log.info("initializing BERTopic dependencies")
 
-umap_model = UMAP(
-    n_neighbors=15, # global / local view of the manifold default 15
-    n_components=5, # target dimensions default 5
-    metric='cosine',
-    min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
-)
+# umap_model = UMAP(
+#     n_neighbors=15, # global / local view of the manifold default 15
+#     n_components=5, # target dimensions default 5
+#     metric='cosine',
+#     min_dist=0.0 # smaller --> more clumped embeddings, larger --> more evenly dispersed default 0.0
+# )
 
-hdbscan_model = HDBSCAN(
-    min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
-    metric='euclidean',
-    cluster_selection_method='eom',
-    prediction_data=True, # if we want to approximate clusters for new points
-)
+# hdbscan_model = HDBSCAN(
+#     min_cluster_size=2, # nr. of points required for a cluster (documents for a topic) default 10
+#     metric='euclidean',
+#     cluster_selection_method='eom',
+#     prediction_data=True, # if we want to approximate clusters for new points
+# )
 
-vectorizer_model = CountVectorizer(
-    ngram_range=(1, 1),
-    stop_words='english',
-)
+# vectorizer_model = CountVectorizer(
+#     ngram_range=(1, 1),
+#     stop_words='english',
+# )
 
-# ps = PartOfSpeech("en_core_web_sm")
-mmr = MaximalMarginalRelevance(diversity=0.3)
+# # ps = PartOfSpeech("en_core_web_sm")
+# mmr = MaximalMarginalRelevance(diversity=0.3)
 
-# representation_model = [ps, mmr]
-representation_model = mmr
+# # representation_model = [ps, mmr]
+# representation_model = mmr
 
-bt = BERTopic(
-    embedding_model=em.ec.embeddings_model,
-    umap_model=umap_model,
-    hdbscan_model=hdbscan_model,
-    vectorizer_model=vectorizer_model,
-    representation_model=representation_model,
-    # verbose=True
-)
+# bt = BERTopic(
+#     embedding_model=em.ec.embeddings_model,
+#     umap_model=umap_model,
+#     hdbscan_model=hdbscan_model,
+#     vectorizer_model=vectorizer_model,
+#     representation_model=representation_model,
+#     # verbose=True
+# )
 
-import pandas as pd
+# import pandas as pd
 
-pd.set_option('display.max_columns', None)
+# pd.set_option('display.max_columns', None)
 
-def model_topics(docs):
+# def model_topics(docs):
 
-  doc_texts = ["\n".join(d["article"]["title"]) + "\n" + "\n".join(d["article"]["paragraphs"]) for d in docs]
-  doc_embeddings = np.array([d["analyzer"]["embeddings"] for d in docs])
+#   doc_texts = ["\n".join(d["article"]["title"]) + "\n" + "\n".join(d["article"]["paragraphs"]) for d in docs]
+#   doc_embeddings = np.array([d["analyzer"]["embeddings"] for d in docs])
 
-  log.info(f"fitting topic modeling model on {len(doc_texts)} docs")
+#   log.info(f"fitting topic modeling model on {len(doc_texts)} docs")
 
-  # bm.bc.bertopic.fit_transform(doc_texts, doc_embeddings)
-  bt.fit_transform(doc_texts, doc_embeddings)
+#   # bm.bc.bertopic.fit_transform(doc_texts, doc_embeddings)
+#   bt.fit_transform(doc_texts, doc_embeddings)
 
-  # ti = bm.bc.bertopic.get_topic_info()
-  ti = bt.get_topic_info()
-  print(ti)
-  print("=============================")
+#   # ti = bm.bc.bertopic.get_topic_info()
+#   ti = bt.get_topic_info()
+#   print(ti)
+#   print("=============================")
 
 
-  # 1. create the topics
+#   # 1. create the topics
 
-  d = {
-    "_id": ...,
-    "topic": "hungary nato orban",
-    "start_date": ...,
-    "end_date": ...,
-    "count": 103,
-    "repr_docs": [
-      {
-        "_id":...,
-        "url": ...,
-        "publish_date": ...,
-        "author": ...,
-        "title": ...,
-      },
-      {
-        "_id":...,
-        "url": ...,
-        "publish_date": ...,
-        "author": ...,
-        "title": ...,
-      },
-      {
-        "_id":...,
-        "url": ...,
-        "publish_date": ...,
-        "author": ...,
-        "title": ...,
-      },
-    ],
-  }
+#   d = {
+#     "_id": ...,
+#     "topic": "hungary nato orban",
+#     "start_date": ...,
+#     "end_date": ...,
+#     "count": 103,
+#     "repr_docs": [
+#       {
+#         "_id":...,
+#         "url": ...,
+#         "publish_date": ...,
+#         "author": ...,
+#         "title": ...,
+#       },
+#       {
+#         "_id":...,
+#         "url": ...,
+#         "publish_date": ...,
+#         "author": ...,
+#         "title": ...,
+#       },
+#       {
+#         "_id":...,
+#         "url": ...,
+#         "publish_date": ...,
+#         "author": ...,
+#         "title": ...,
+#       },
+#     ],
+#   }
 
-  # create the topics without docs
-  topics = []
-  topic_info = bt.get_topic_info()
+#   # create the topics without docs
+#   topics = []
+#   topic_info = bt.get_topic_info()
 
-  start_time = datetime.now().isoformat()
-  end_time = datetime.now().isoformat()
+#   start_time = datetime.now().isoformat()
+#   end_time = datetime.now().isoformat()
 
-  topic_df_dict = topic_info.loc[topic_info["Topic"] != -1, ["Count", "Representation"]].to_dict()
-  for d in zip(topic_df_dict["Count"].values(), topic_df_dict["Representation"].values()):
-    topics.append({
-      "_id": uuid.uuid4().hex, 
-      "start_time": start_time,
-      "end_time": end_time,
-      "topic": " ".join(d[1]),
-      "count": d[0],
-      "representative_articles": [],
-    })
+#   topic_df_dict = topic_info.loc[topic_info["Topic"] != -1, ["Count", "Representation"]].to_dict()
+#   for d in zip(topic_df_dict["Count"].values(), topic_df_dict["Representation"].values()):
+#     topics.append({
+#       "_id": uuid.uuid4().hex, 
+#       "start_time": start_time,
+#       "end_time": end_time,
+#       "topic": " ".join(d[1]),
+#       "count": d[0],
+#       "representative_articles": [],
+#     })
 
-  # add docs to topics
-  doc_info = bt.get_document_info(doc_texts)
+#   # add docs to topics
+#   doc_info = bt.get_document_info(doc_texts)
 
-  # don't filter out anything, we need the correct order to correlate with 'docs'
-  doc_df_dict = doc_info.loc[doc_info["Topic"] != -1, ["Topic", "Representative_document"]].to_dict()
-  for doc_ind, topic_ind, representative in zip(
-    doc_df_dict["Topic"].keys(), 
-    doc_df_dict["Topic"].values(), 
-    doc_df_dict["Representative_document"].values()
-  ):
+#   # don't filter out anything, we need the correct order to correlate with 'docs'
+#   doc_df_dict = doc_info.loc[doc_info["Topic"] != -1, ["Topic", "Representative_document"]].to_dict()
+#   for doc_ind, topic_ind, representative in zip(
+#     doc_df_dict["Topic"].keys(), 
+#     doc_df_dict["Topic"].values(), 
+#     doc_df_dict["Representative_document"].values()
+#   ):
     
-    # add representative doc
-    if representative:
+#     # add representative doc
+#     if representative:
 
-      # add duplicate of article to topic
-      art = docs[doc_ind]["article"]
-      art_duplicate = {
-        "_id": docs[doc_ind]["_id"],
-        "url": art["url"],
-        "publish_date": art["publish_date"],
-        "author": art["author"],
-        "title": art["title"],
-      }
-      topics[topic_ind]["representative_articles"].append(art_duplicate)
+#       # add duplicate of article to topic
+#       art = docs[doc_ind]["article"]
+#       art_duplicate = {
+#         "_id": docs[doc_ind]["_id"],
+#         "url": art["url"],
+#         "publish_date": art["publish_date"],
+#         "author": art["author"],
+#         "title": art["title"],
+#       }
+#       topics[topic_ind]["representative_articles"].append(art_duplicate)
 
-    # update the article with duplicate of topic
-    # TODO: upsert with array item
-    # if "topics" not in docs[doc_ind]["analyzer"]: 
-    #   docs[doc_ind]["analyzer"]["topics"] = []
+#     # update the article with duplicate of topic
+#     # TODO: upsert with array item
+#     # if "topics" not in docs[doc_ind]["analyzer"]: 
+#     #   docs[doc_ind]["analyzer"]["topics"] = []
     
-    # docs[doc_ind]["analyzer"]["topics"].append(
-    #   {
-    #     "_id": topics[topic_ind]["_id"],
-    #     "topic": topics[topic_ind]["topic"],
-    #   }
-    # )
+#     # docs[doc_ind]["analyzer"]["topics"].append(
+#     #   {
+#     #     "_id": topics[topic_ind]["_id"],
+#     #     "topic": topics[topic_ind]["topic"],
+#     #   }
+#     # )
 
-    es_topic = {
-      "id": topics[topic_ind]["_id"],
-      "topic": topics[topic_ind]["topic"],
-    }
-    es.update_article_topic(docs[doc_ind]["_id"], es_topic)
+#     es_topic = {
+#       "id": topics[topic_ind]["_id"],
+#       "topic": topics[topic_ind]["topic"],
+#     }
+#     es.update_article_topic(docs[doc_ind]["_id"], es_topic)
   
-  # insert the topics
-  # mr.store_docs(MONGO_DB_ANALYZER, "topics", topics)
-  es.store_topic_batch(topics)
-  
-
-  # update docs in mongodb
-
-  # update docs in elasticsearch
-
-  # TODO: insert into elasticsearch
-  # es.es.index(index="article_topics", )
-
+#   # insert the topics
+#   # mr.store_docs(MONGO_DB_ANALYZER, "topics", topics)
+#   es.store_topic_batch(topics)
   
 
-  # di = bm.bc.bertopic.get_document_info(doc_texts)
-  # di = bt.get_document_info(doc_texts)
+#   # update docs in mongodb
 
-  # print(di)
-  print(topics[0])
-  # print(json.dumps(topics[0], indent=2))
-  print("=======================================")
+#   # update docs in elasticsearch
+
+#   # TODO: insert into elasticsearch
+#   # es.es.index(index="article_topics", )
+
   
-  import copy
-  cp = copy.deepcopy(docs)
-  for c in cp:
-    del c["analyzer"]["embeddings"]
-    del c["article"]["paragraphs"]
 
-  # print(json.dumps(cp[0], indent=2))
-  print(cp[0])
-  print("=======================================")
+#   # di = bm.bc.bertopic.get_document_info(doc_texts)
+#   # di = bt.get_document_info(doc_texts)
 
-  exit(0)
+#   # print(di)
+#   print(topics[0])
+#   # print(json.dumps(topics[0], indent=2))
+#   print("=======================================")
+  
+#   import copy
+#   cp = copy.deepcopy(docs)
+#   for c in cp:
+#     del c["analyzer"]["embeddings"]
+#     del c["article"]["paragraphs"]
 
+#   # print(json.dumps(cp[0], indent=2))
+#   print(cp[0])
+#   print("=======================================")
 
-from multiprocessing import Process
+#   exit(0)
+
 
 if __name__ == '__main__':
-  # rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process)
 
-  # TODO: use multiprocessing
+  rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
 
-  # mr.watch_collection(
-  #   MONGO_DB_SCRAPER, 
-  #   MONGO_COLLECTION_SCRAPER, 
-  #   3000, 
-  #   5, 
-  #   processed_update_field="analyzer.processed", 
-  #   callback=process
-  # )
-
-
-  # mr.watch_collection(
-  #   MONGO_DB_ANALYZER, 
-  #   MONGO_COLLECTION_ANALYZER, 
-  #   3000, 
-  #   200, 
-  #   processed_update_field="topic_modeling.processed",
-  #   callback=model_topics
-  # )
-
-  # p2 = Process(target=mr.watch_collection, args=(
-  #   MONGO_DB_ANALYZER, 
-  #   MONGO_COLLECTION_ANALYZER, 
-  #   3000, 
-  #   200, 
-  #   "topic_modeling.processed",
-  #   model_topics
-  # ))
-
-  # p2.start()
-
-  # p2.join()
-
-
-  # rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
-
-  # RedisNotificationConsumer(
-  #   REDIS_HOST, 
-  #   REDIS_PORT,
-  #   stream_name=REDIS_STREAM_NAME,
-  #   consumer_group=REDIS_CONSUMER_GROUP
-  # ).consume(process_notification)
-
-
-  docs = es.es.search(
-    index="articles",
-    query={
-      "match_all": {}
-    }, 
-  )
-
-  dt = [{
-    "_id": d["_id"],
-    "analyzer": {
-      "embeddings": d["_source"]["analyzer"]["embeddings"],
-    },
-    "article": {
-      **d["_source"]["article"],
-    }
-  } for d in docs["hits"]["hits"]]
-
-
-  print(dt)
-
-  model_topics(dt)
+  RedisNotificationConsumer(
+    REDIS_HOST, 
+    REDIS_PORT,
+    stream_name=REDIS_STREAM_NAME,
+    consumer_group=REDIS_CONSUMER_GROUP
+  ).consume(process_notification)
