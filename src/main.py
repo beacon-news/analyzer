@@ -59,9 +59,6 @@ es = ElasticsearchStore(
   not ELASTIC_TLS_INSECURE
 )
 
-rh = RedisHandler(REDIS_HOST, REDIS_PORT)
-
-
 def print_message(message):
   print(f"received from stream: {message}")
 
@@ -439,8 +436,6 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
 
 
 if __name__ == '__main__':
-
-  rh.consume_stream(REDIS_STREAM_NAME, REDIS_CONSUMER_GROUP, process_notification)
 
   RedisNotificationConsumer(
     REDIS_HOST, 
