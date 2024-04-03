@@ -1,7 +1,5 @@
 #!/bin/bash
 
-s=''
-
 for i in $(cat .env)
 do
   export $i

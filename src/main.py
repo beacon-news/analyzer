@@ -31,7 +31,7 @@ REDIS_STREAM_NAME = check_env('REDIS_STREAM_NAME', 'scraper_articles')
 
 ELASTIC_USER = check_env('ELASTIC_USER', 'elastic')
 ELASTIC_PASSWORD = check_env('ELASTIC_PASSWORD')
-ELASTIC_CONN = check_env('ELASTIC_HOST', 'https://localhost:9200')
+ELASTIC_CONN = check_env('ELASTIC_CONN', 'https://localhost:9200')
 ELASTIC_CA_PATH = check_env('ELASTIC_CA_PATH', 'certs/_data/ca/ca.crt')
 ELASTIC_TLS_INSECURE = bool(check_env('ELASTIC_TLS_INSECURE', False))
 
