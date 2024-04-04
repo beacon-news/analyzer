@@ -17,8 +17,6 @@ ENV SPACY_MODEL=en_core_web_sm
 ENV SPACY_MODEL_DIR=models/ner/
 ENV ELASTIC_PASSWORD=password
 ENV MONGO_DB_SCRAPER=scraper
-ENV MONGO_DB_ANALYZER=analyzer
 ENV MONGO_COLLECTION_SCRAPER=scraped_articles
-ENV MONGO_COLLECTION_ANALYZER=analyzed_articles
 
 ENTRYPOINT ["python3", "src/main.py"]
