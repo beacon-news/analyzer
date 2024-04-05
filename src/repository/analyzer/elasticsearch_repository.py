@@ -1,10 +1,11 @@
 from utils import log_utils
+from domain import AnalyzedArticle
 import logging
 from elasticsearch import Elasticsearch, exceptions, helpers
-import uuid
+from repository.analyzer.analyzer_repository import AnalyzerRepository
 
 
-class ElasticsearchStore:
+class ElasticsearchRepository(AnalyzerRepository):
 
   @classmethod
   def configure_logging(cls, level: int):
@@ -29,8 +30,9 @@ class ElasticsearchStore:
     # TODO: add some form of auth
     self.log.info(f"connecting to Elasticsearch at {conn}")
     self.es = Elasticsearch(conn, basic_auth=(user, password), ca_certs=cacerts, verify_certs=verify_certs)
+    self.__assert_articles_index()
 
-    # assert articles index
+  def __assert_articles_index(self):
     try:
       self.log.info(f"creating/asserting index '{self.index_name}'")
       self.es.indices.create(index=self.index_name, mappings={
@@ -49,7 +51,7 @@ class ElasticsearchStore:
             "properties": {
               "categories": {
                 "type": "text",
-                # TODO: remove keyword mapping? it doesn't do much...
+                # keyword mapping needed so we can do aggregations
                 "fields": {
                   "keyword": {
                     "type": "keyword",
@@ -59,7 +61,7 @@ class ElasticsearchStore:
               },
               "embeddings": {
                 "type": "dense_vector",
-                "dims": 384, # depends on model used
+                "dims": 384, # depends on the embeddings model
               },
               "entities": {
                 "type": "text"
@@ -90,24 +92,39 @@ class ElasticsearchStore:
     except exceptions.BadRequestError as e:
       if e.message == "resource_already_exists_exception":
         self.log.info(f"index {self.index_name} already exists")
-
   
-  def store(self, analyzed_article: dict) -> str:
-    id = uuid.uuid4()
-    resp = self.es.index(index=self.index_name, id=id, document=analyzed_article)
-    self.log.info(f"stored article with id {resp['_id']} in {self.index_name}")
-    return resp["_id"]
+  def store_analyzed_articles(self, analyzed_articles: list[AnalyzedArticle]) -> list[str]:
+    """Store the analyzed articles in 'streaming bulk' mode."""
 
-  def store_article_batch(self, analyzed_articles: list[dict]) -> list[str]:
+    docs = [self.__map_to_repo_doc(art) for art in analyzed_articles] 
     ids = []
-    self.log.info(f"attempting to insert {len(analyzed_articles)} articles in {self.index_name}")
-    for ok, action in helpers.streaming_bulk(self.es, self.__generate_article_actions(analyzed_articles)):
+    self.log.info(f"attempting to insert {len(docs)} articles in {self.index_name}")
+    for ok, action in helpers.streaming_bulk(self.es, self.__generate_article_actions(docs)):
       if not ok:
         self.log.error(f"failed to bulk store article: {action}")
         continue
       ids.append(action["index"]["_id"])
       self.log.debug(f"successfully stored article: {action}")
     return ids
+  
+  def __map_to_repo_doc(self, analyzed_article: AnalyzedArticle) -> dict:
+    # create repository model from analyzed article
+    return {
+      "analyze_time": analyzed_article.analyze_time.isoformat(),
+      "analyzer": {
+        "categories": analyzed_article.categories,
+        "entities": analyzed_article.entities,
+        "embeddings": analyzed_article.embeddings,
+      },
+      "article": {
+        "id" : analyzed_article.article.id,
+        "url": analyzed_article.article.url,
+        "publish_date": analyzed_article.article.publish_date.isoformat(),
+        "author": analyzed_article.article.author,
+        "title": analyzed_article.article.title,
+        "paragraphs": analyzed_article.article.paragraphs
+      }
+    }
   
   def __generate_article_actions(self, articles: list[dict]):
     for i in range(len(articles)):
@@ -117,49 +134,3 @@ class ElasticsearchStore:
         **articles[i]
       }
       yield action
-  
-  def store_topic_batch(self, topics: list[dict]) -> list[str]:
-    topics_index = "topics"
-    ids = []
-    self.log.info(f"attempting to insert {len(topics)} docs in {topics_index}")
-    for ok, action in helpers.streaming_bulk(self.es, self.__generate_topic_actions(topics_index, topics)):
-      if not ok:
-        self.log.error(f"failed to bulk store topic: {action}")
-        continue
-      ids.append(action["index"]["_id"])
-      self.log.debug(f"successfully stored topic: {action}")
-    return ids
-
-  def __generate_topic_actions(self, index: str, topics: list[dict]):
-    for i in range(len(topics)):
-      action = {
-        "_index": index,
-        # also contains the "_id" 
-        **topics[i],
-      }
-      yield action
-  
-  def update_article_topic(self, id: str, topic: dict):
-    # TODO: use this a compiled script
-    self.es.update(index=self.index_name, id=id, body={
-      "script": {
-        "source": """
-        if (ctx._source.topics == null) {
-          ctx._source.topics = [
-            'topic_ids': [],
-            'topic_names': []
-          ]
-        }
-        if (!ctx._source.topics.topic_ids.contains(params.topic_id)) { 
-          ctx._source.topics.topic_ids.add(params.topic_id) 
-        } 
-        if (!ctx._source.topics.topic_names.contains(params.topic)) { 
-          ctx._source.topics.topic_names.add(params.topic) 
-        }
-        """,
-        "params": {
-          "topic_id": topic["id"],
-          "topic": topic["topic"],
-        }
-      }
-    })

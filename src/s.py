@@ -1,4 +1,4 @@
-from article_store.elasticsearch_store import ElasticsearchStore
+from article_store.elasticsearch_store import ElasticsearchRepository
 from elasticsearch import Elasticsearch
 import json
 from datetime import datetime

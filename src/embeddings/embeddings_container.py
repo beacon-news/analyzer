@@ -25,8 +25,8 @@ class EmbeddingsModelContainer:
 
   @classmethod
   def load(cls, filename) -> EmbeddingsModelContainer:
+    print(f"loading {cls.__name__} from {filename}")
     with open(filename, 'rb') as f:
-      print(f"loading {cls.__name__} from {filename}")
       d = pickle.load(f)
       save_date = d['save_date']
       embeddings_model = d['embeddings_model']

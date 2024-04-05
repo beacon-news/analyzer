@@ -114,6 +114,7 @@ class RedisHandler:
 
         except Exception:
           self.log.exception("error while processing message")
+          raise
 
 
   def __auto_claim(self, stream_name, consumer_group, consumer_name, exit_event: threading.Event): 

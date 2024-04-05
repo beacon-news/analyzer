@@ -1,0 +1,2 @@
+from repository.scraper.scraper_repository import ScraperRepository
+from repository.scraper.mongo_repository import MongoRepository

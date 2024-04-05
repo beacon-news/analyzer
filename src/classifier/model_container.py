@@ -33,6 +33,7 @@ class ModelContainer:
 
   @classmethod
   def load(cls, filename) -> ModelContainer:
+    print(f"loading {cls.__name__} from {filename}")
     with open(filename, 'rb') as f:
       d = pickle.load(f)
       save_date = d['save_date']
