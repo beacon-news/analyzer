@@ -1,4 +1,4 @@
-from embeddings.embeddings_container import EmbeddingsModelContainer
+from analysis.embeddings.embeddings_container import EmbeddingsModelContainer
 import numpy as np
 from utils import log_utils
 import logging

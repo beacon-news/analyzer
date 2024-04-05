@@ -1,6 +1,6 @@
-from notifications.notification_consumer import NotificationConsumer 
-from notifications.redis_handler import RedisHandler 
-from notifications.scraper_notification import ScraperDoneNotification
+from api.notifications.notification_consumer import NotificationConsumer 
+from api.notifications.redis_handler import RedisHandler 
+from api.notifications.scraper_notification import ScraperDoneNotification
 import json
 
 class RedisNotificationConsumer(NotificationConsumer):

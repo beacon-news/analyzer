@@ -1,4 +1,4 @@
-from classifier.model_container import ModelContainer
+from analysis.classifier.model_container import ModelContainer
 import numpy as np
 from utils import log_utils
 import logging

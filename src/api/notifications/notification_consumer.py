@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Callable
-from notifications.scraper_notification import ScraperDoneNotification
+from api.notifications.scraper_notification import ScraperDoneNotification
 
 
 class NotificationConsumer(ABC):

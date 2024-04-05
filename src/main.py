@@ -1,13 +1,13 @@
-import os
-from notifications import RedisNotificationConsumer, ScraperDoneNotification
-from classifier import CategoryClassifier, ModelContainer
-from embeddings import EmbeddingsModelContainer, EmbeddingsModel
-from ner import SpacyEntityRecognizer
+from api.notifications import RedisNotificationConsumer, ScraperDoneNotification
+from analysis.classifier import CategoryClassifier, ModelContainer
+from analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
+from analysis.ner import SpacyEntityRecognizer
+from domain import Article, AnalyzedArticle
 from utils import log_utils
 from repository.analyzer import *
 from repository.scraper import *
 from datetime import datetime
-from domain import Article, AnalyzedArticle
+import os
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -64,6 +64,7 @@ scraper_repo: ScraperRepository = MongoRepository(
   collection_name=MONGO_COLLECTION_SCRAPER,
 ) 
 
+# TODO: separate this processing stuff into a proper business layer
 
 def process_notification(notifications: list[ScraperDoneNotification]):
 
