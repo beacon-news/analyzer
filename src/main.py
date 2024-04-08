@@ -2,7 +2,7 @@ from api.notifications import RedisNotificationConsumer, ScraperDoneNotification
 from analysis.classifier import CategoryClassifier, ModelContainer
 from analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
 from analysis.ner import SpacyEntityRecognizer
-from domain import Article, AnalyzedArticle
+from domain import *
 from utils import log_utils
 from repository.analyzer import *
 from repository.scraper import *
@@ -86,40 +86,53 @@ def process_notification(notifications: list[ScraperDoneNotification]):
 
 def process(docs: list[dict]) -> list[str]:
 
-  articles = []
+  scraped_articles = []
   prepared_texts = []
 
   try: 
     for doc in docs:
 
-      article = map_to_article(doc)
-      if article is None:
+      scraped_article = map_to_article(doc)
+      if scraped_article is None:
         continue
-
-      articles.append(article)
+    
+      scraped_articles.append(scraped_article)
 
       # extract text for analysis for each document
-      text = '\n'.join(article.title) + '\n'.join(article.paragraphs)
+      text = '\n'.join(scraped_article.title) + '\n'.join(scraped_article.paragraphs)
       prepared_texts.append(text)
+    
+    if len(prepared_texts) == 0:
+      log.warning(f"no text found in documents in scraped batch, skipping batch")
+      return []
 
     # run analysis in batch
     category_labels, embeddings, entities = analyze_batch(prepared_texts)
     
     analyze_time = datetime.now()
-    analyzed_articles = [
-      AnalyzedArticle(
-        article=article,
+    articles = [
+      Article(
+        id=scr_art.id,
+        url=scr_art.url,
+        source=scr_art.metadata.source,
+        publish_date=scr_art.publish_date,
+        image=scr_art.image,
+        author=scr_art.author,
+        title=scr_art.title,
+        paragraphs=scr_art.paragraphs,
+        categories=set([*art_categories, *[cat.strip().lower() for cat in scr_art.metadata.categories]]),
         analyze_time=analyze_time,
-        categories=art_categories,
+        analyzed_categories=art_categories,
         embeddings=art_embeddings,
-        entities=art_entities
+        entities=art_entities,
+        topics=None
       )
-      for article, art_categories, art_embeddings, art_entities in zip(articles, category_labels, embeddings, entities)
+      for scr_art, art_categories, art_embeddings, art_entities in zip(scraped_articles, category_labels, embeddings, entities)
     ]
 
     # store in elasticsearch
-    ids = repository.store_analyzed_articles(analyzed_articles)
-    log.info(f"done storing batch of {len(analyzed_articles)} articles in Elasticsearch")
+    ids = repository.store_analyzed_articles(articles)
+    log.info(f"done storing batch of {len(articles)} articles in Elasticsearch")
 
     return ids
 
@@ -127,7 +140,7 @@ def process(docs: list[dict]) -> list[str]:
     log.exception(f"error trying to analyze doc: {doc}")
 
 
-def map_to_article(doc: dict) -> Article | None:
+def map_to_article(doc: dict) -> ScrapedArticle | None:
   if 'id' not in doc:
     log.error(f"no 'id' in doc: {doc}, skipping analysis")
     return None
@@ -137,6 +150,13 @@ def map_to_article(doc: dict) -> Article | None:
     log.error(f"no 'url' in doc: {doc}, skipping analysis")
     return None
   url = doc['url']
+
+  # metadata is optional, can be None
+  art_meta = ScrapedArticleMetadata()
+  metadata = doc.get('metadata', None)
+  if metadata:
+    art_meta.source = metadata.get('source', None)
+    art_meta.categories = metadata.get('categories', [])
 
   if 'components' not in doc:
     log.error(f"no 'components' in doc: {doc}, skipping analysis")
@@ -157,6 +177,7 @@ def map_to_article(doc: dict) -> Article | None:
   paras = [] 
   authors = []
   publish_date = None
+  image = None
   for component in comps:
     if 'title' in component:
       titles.append(component['title'])
@@ -166,16 +187,29 @@ def map_to_article(doc: dict) -> Article | None:
         return None
       paras.extend(component['paragraphs'])
     elif 'author' in component:
-      authors.append(component['author'])
+      if type(component['author']) == list:
+        authors.extend(component['author'])
+      else:
+        authors.append(component['author'])
     elif 'publish_date' in component:
       publish_date = component['publish_date']
       publish_date = datetime.fromisoformat(publish_date).replace(second=0, microsecond=0)
+    elif 'image' in component:
+      image = component['image']
+  
+  # verify essential attributes
+  if len(titles) == 0 or len(paras) == 0 or publish_date is None:
+    log.error(f"one of 'title', 'paragraphs', 'publish_date' not found in doc: {doc}, skipping analysis")
+    return None
+
 
   # transform the scraped format into a more manageable one
-  return Article(
+  return ScrapedArticle(
     id=id,
     url=url,
+    metadata=art_meta,
     publish_date=publish_date,
+    image=image,
     author=authors,
     title=titles,
     paragraphs=paras,

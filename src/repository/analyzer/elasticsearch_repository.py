@@ -1,5 +1,5 @@
 from utils import log_utils
-from domain import AnalyzedArticle
+from domain import Article
 import logging
 from elasticsearch import Elasticsearch, exceptions, helpers
 from repository.analyzer.analyzer_repository import AnalyzerRepository
@@ -51,13 +51,7 @@ class ElasticsearchRepository(AnalyzerRepository):
             "properties": {
               "categories": {
                 "type": "text",
-                # keyword mapping needed so we can do aggregations
-                "fields": {
-                  "keyword": {
-                    "type": "keyword",
-                    "ignore_above": 256
-                  }
-                }
+                "enabled": "false", # don't index only the analyzer-generated categories
               },
               "embeddings": {
                 "type": "dense_vector",
@@ -70,11 +64,28 @@ class ElasticsearchRepository(AnalyzerRepository):
           },
           "article": {
             "properties": {
+              "id": {
+                "type": "keyword",
+              },
               "url": {
                 "type": "keyword",
               },
+              "source": {
+                "type": "text",
+                # keyword mapping needed so we can do aggregations
+                "fields": {
+                  "keyword": {
+                    "type": "keyword",
+                    "ignore_above": 256
+                  }
+                }
+              },
               "publish_date": {
                 "type": "date",
+              },
+              "image": {
+                "type": "keyword",
+                "enabled": "false", # don't index image urls
               },
               "author": {
                 "type": "text",
@@ -85,6 +96,16 @@ class ElasticsearchRepository(AnalyzerRepository):
               "paragraphs": {
                 "type": "text",
               },
+              "categories": {
+                "type": "text",
+                # keyword mapping needed so we can do aggregations
+                "fields": {
+                  "keyword": {
+                    "type": "keyword",
+                    "ignore_above": 256
+                  }
+                }
+              },
             }
           }
         }
@@ -93,7 +114,7 @@ class ElasticsearchRepository(AnalyzerRepository):
       if e.message == "resource_already_exists_exception":
         self.log.info(f"index {self.index_name} already exists")
   
-  def store_analyzed_articles(self, analyzed_articles: list[AnalyzedArticle]) -> list[str]:
+  def store_analyzed_articles(self, analyzed_articles: list[Article]) -> list[str]:
     """Store the analyzed articles in 'streaming bulk' mode."""
 
     docs = [self.__map_to_repo_doc(art) for art in analyzed_articles] 
@@ -107,23 +128,27 @@ class ElasticsearchRepository(AnalyzerRepository):
       self.log.debug(f"successfully stored article: {action}")
     return ids
   
-  def __map_to_repo_doc(self, analyzed_article: AnalyzedArticle) -> dict:
+  def __map_to_repo_doc(self, article: Article) -> dict:
     # create repository model from analyzed article
     return {
-      "analyze_time": analyzed_article.analyze_time.isoformat(),
+      "analyze_time": article.analyze_time.isoformat(),
       "analyzer": {
-        "categories": analyzed_article.categories,
-        "entities": analyzed_article.entities,
-        "embeddings": analyzed_article.embeddings,
+        "categories": article.analyzed_categories,
+        "entities": article.entities,
+        "embeddings": article.embeddings,
       },
       "article": {
-        "id" : analyzed_article.article.id,
-        "url": analyzed_article.article.url,
-        "publish_date": analyzed_article.article.publish_date.isoformat(),
-        "author": analyzed_article.article.author,
-        "title": analyzed_article.article.title,
-        "paragraphs": analyzed_article.article.paragraphs
-      }
+        "id" : article.id,
+        "url": article.url,
+        "source": article.source,
+        "publish_date": article.publish_date.isoformat(),
+        "image": article.image,
+        "author": article.author,
+        "title": article.title,
+        "paragraphs": article.paragraphs,
+        "categories": article.categories,
+      }, 
+      # topics are NOT added here, they will be added by the topic modeler
     }
   
   def __generate_article_actions(self, articles: list[dict]):
