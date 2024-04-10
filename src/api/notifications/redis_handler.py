@@ -113,7 +113,9 @@ class RedisHandler:
           # self.log.debug(f"deleted message {message}")
 
         except Exception:
-          self.log.exception("error while processing message")
+          self.log.exception("error while processing message, waiting for autoclaim thread to finish, exiting")
+          autoclaim_exit.set()
+          autoclaim_thread.join()
           raise
 
 

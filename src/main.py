@@ -8,6 +8,7 @@ from repository.analyzer import *
 from repository.scraper import *
 from datetime import datetime
 import os
+import hashlib
 
 def check_env(name: str, default=None) -> str:
   value = os.environ.get(name, default)
@@ -108,31 +109,56 @@ def process(docs: list[dict]) -> list[str]:
 
     # run analysis in batch
     category_labels, embeddings, entities = analyze_batch(prepared_texts)
-    
-    analyze_time = datetime.now()
-    articles = [
-      Article(
-        id=scr_art.id,
-        url=scr_art.url,
-        source=scr_art.metadata.source,
-        publish_date=scr_art.publish_date,
-        image=scr_art.image,
-        author=scr_art.author,
-        title=scr_art.title,
-        paragraphs=scr_art.paragraphs,
-        categories=set([*art_categories, *[cat.strip().lower() for cat in scr_art.metadata.categories]]),
-        analyze_time=analyze_time,
-        analyzed_categories=art_categories,
-        embeddings=art_embeddings,
-        entities=art_entities,
-        topics=None
-      )
-      for scr_art, art_categories, art_embeddings, art_entities in zip(scraped_articles, category_labels, embeddings, entities)
-    ]
 
-    # store in elasticsearch
+    # gather the categories and articles
+    articles = []
+    unique_category_names = set()
+    categories = {}
+    analyze_time = datetime.now()
+    for scr_art, art_categories, art_embeddings, art_entities in zip(scraped_articles, category_labels, embeddings, entities):
+      
+      # gather the categories
+      meta_categories = [cat.strip().lower() for cat in scr_art.metadata.categories]
+      meta_and_predicted_cat = set([*art_categories, *meta_categories])
+
+      # add missing category objects
+      for cat_name in meta_and_predicted_cat.difference(unique_category_names):
+        categories[cat_name] = Category(
+          id=hashlib.sha1(cat_name.encode()).hexdigest(), 
+          name=cat_name
+        )
+      unique_category_names = unique_category_names.union(meta_and_predicted_cat)
+
+      # create Category objects
+      meta_and_predicted_cat = [categories[name] for name in meta_and_predicted_cat]
+      predicted_categories = [categories[name] for name in art_categories]
+
+      articles.append(
+        Article(
+          id=scr_art.id,
+          url=scr_art.url,
+          source=scr_art.metadata.source,
+          publish_date=scr_art.publish_date,
+          image=scr_art.image,
+          author=scr_art.author,
+          title=scr_art.title,
+          paragraphs=scr_art.paragraphs,
+          categories=meta_and_predicted_cat,
+          analyze_time=analyze_time,
+          analyzed_categories=predicted_categories,
+          embeddings=art_embeddings,
+          entities=art_entities,
+          topics=None
+        )
+      )
+
+    # create the categories if they don't exist
+    cat_ids = repository.store_categories(list(categories.values()))
+    log.info(f"stored {len(cat_ids)} categories")
+
+    # create the articles
     ids = repository.store_analyzed_articles(articles)
-    log.info(f"done storing batch of {len(articles)} articles in Elasticsearch")
+    log.info(f"done storing batch of {len(articles)} articles")
 
     return ids
 
@@ -201,7 +227,6 @@ def map_to_article(doc: dict) -> ScrapedArticle | None:
   if len(titles) == 0 or len(paras) == 0 or publish_date is None:
     log.error(f"one of 'title', 'paragraphs', 'publish_date' not found in doc: {doc}, skipping analysis")
     return None
-
 
   # transform the scraped format into a more manageable one
   return ScrapedArticle(
