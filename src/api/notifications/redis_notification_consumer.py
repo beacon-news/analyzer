@@ -17,8 +17,6 @@ class RedisNotificationConsumer(NotificationConsumer):
       notification_list = json.loads(message[1]["done"])
       notifications = [ScraperDoneNotification(
         id=notification["id"],
-        url=notification["url"],
-        scrape_time=notification["scrape_time"],
       ) for notification in notification_list]
 
       callback(notifications, *callback_args)
