@@ -3,11 +3,11 @@ from typing import Callable
 from api.notifications.scraper_notification import ScraperDoneNotification
 
 
-class NotificationConsumer(ABC):
+class ScraperEventConsumer(ABC):
   """Called when a notification is received."""
 
   @abstractmethod
-  def consume_scraper_done(self, callback: Callable[[ScraperDoneNotification], None], *callback_args) -> None:
+  def consume_done_notification(self, callback: Callable[[list[ScraperDoneNotification]], None], *callback_args) -> None:
     """Consume a list of scraper done notifications."""
     raise NotImplementedError
   

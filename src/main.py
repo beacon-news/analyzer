@@ -1,4 +1,4 @@
-from api.notifications import RedisNotificationConsumer, ScraperDoneNotification
+from api.notifications import RedisScraperEventConsumer, ScraperDoneNotification
 from analysis.classifier import CategoryClassifier, ModelContainer
 from analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
 from analysis.ner import SpacyEntityRecognizer
@@ -255,9 +255,38 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
 
 if __name__ == '__main__':
 
-  RedisNotificationConsumer(
-    REDIS_HOST, 
+  # RedisScraperEventConsumer(
+  #   REDIS_HOST, 
+  #   REDIS_PORT,
+  #   stream_name=REDIS_STREAM_NAME,
+  #   consumer_group=REDIS_CONSUMER_GROUP
+  # ).consume_done_notification(process_notification)
+
+  def print_arts(arts: list[dict]):
+    print("=================")
+    print("printing articles")
+    print("received ", len(arts))
+    for art in arts:
+      print(art)
+    print("=================")
+
+  import api.scraped_articles.redis_article_consumer as rc
+  import api.scraped_articles.article_batcher as ab
+
+  r = rc.RedisScrapedArticleConsumer(
+    REDIS_HOST,
     REDIS_PORT,
-    stream_name=REDIS_STREAM_NAME,
-    consumer_group=REDIS_CONSUMER_GROUP
-  ).consume_scraper_done(process_notification)
+    stream_name="test",
+    consumer_group="test",
+  )
+
+  b = ab.ArticleBatcher(
+    r,
+    max_batch_size=3,
+    max_batch_timeout_millis=5000,
+  )
+
+  b.consume_batched_articles(print_arts)
+
+
+  

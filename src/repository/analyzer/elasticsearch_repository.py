@@ -117,16 +117,6 @@ class ElasticsearchRepository(AnalyzerRepository):
                   }
                 }
               },
-              # "categories": {
-              #   "type": "text",
-              #   # keyword mapping needed so we can do aggregations
-              #   "fields": {
-              #     "keyword": {
-              #       "type": "keyword",
-              #       "ignore_above": 256
-              #     }
-              #   }
-              # },
             }
           }
         }
