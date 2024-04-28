@@ -1,7 +1,12 @@
-from api.notifications import RedisScraperEventConsumer, ScraperDoneNotification
+# from api.notifications import RedisScraperEventConsumer, ScraperDoneNotification
 from analysis.classifier import CategoryClassifier, ModelContainer
 from analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
 from analysis.ner import SpacyEntityRecognizer
+
+import api.scraped_articles.redis_article_consumer as rc
+import api.scraped_articles.article_batcher as ab
+import api.redis_handler as rh
+
 from domain import *
 from utils import log_utils
 from repository.analyzer import *
@@ -27,8 +32,9 @@ SPACY_MODEL_DIR = check_env('SPACY_MODEL_DIR')
 REDIS_HOST = check_env('REDIS_HOST', 'localhost')
 REDIS_PORT = int(check_env('REDIS_PORT', 6379))
 
+# Redis stream consumer
 REDIS_CONSUMER_GROUP = check_env('REDIS_CONSUMER_GROUP', 'article_analyzer')
-REDIS_STREAM_NAME = check_env('REDIS_STREAM_NAME', 'scraper_articles')
+REDIS_STREAM_NAME = check_env('REDIS_STREAM_NAME', 'scraped_articles')
 
 # Elasticsearch
 ELASTIC_USER = check_env('ELASTIC_USER', 'elastic')
@@ -37,11 +43,15 @@ ELASTIC_CONN = check_env('ELASTIC_CONN', 'https://localhost:9200')
 ELASTIC_CA_PATH = check_env('ELASTIC_CA_PATH', 'certs/_data/ca/ca.crt')
 ELASTIC_TLS_INSECURE = bool(check_env('ELASTIC_TLS_INSECURE', False))
 
-# Mongo
-MONGO_HOST = check_env('MONGO_HOST', 'localhost')
-MONGO_PORT = int(check_env('MONGO_PORT', 27017))
-MONGO_DB_SCRAPER = check_env('MONGO_DB_SCRAPER', 'scraper')
-MONGO_COLLECTION_SCRAPER = check_env('MONGO_COLLECTION_SCRAPER', 'scraped_articles')
+# Article batcher
+MAX_BATCH_SIZE = int(check_env('MAX_BATCH_SIZE', 300))
+MAX_BATCH_TIMEOUT_MILLIS = int(check_env('MAX_BATCH_TIMEOUT_MILLIS', 5000))
+
+# # Mongo
+# MONGO_HOST = check_env('MONGO_HOST', 'localhost')
+# MONGO_PORT = int(check_env('MONGO_PORT', 27017))
+# MONGO_DB_SCRAPER = check_env('MONGO_DB_SCRAPER', 'scraper')
+# MONGO_COLLECTION_SCRAPER = check_env('MONGO_COLLECTION_SCRAPER', 'scraped_articles')
 
 log = log_utils.create_console_logger("Analyzer")
 log.info(f"Initializing dependencies")
@@ -58,31 +68,48 @@ repository: AnalyzerRepository = ElasticsearchRepository(
   not ELASTIC_TLS_INSECURE
 )
 
-scraper_repo: ScraperRepository = MongoRepository(
-  host=MONGO_HOST,
-  port=MONGO_PORT,
-  db_name=MONGO_DB_SCRAPER,
-  collection_name=MONGO_COLLECTION_SCRAPER,
-) 
+redis_handler = rh.RedisHandler(
+  REDIS_HOST,
+  REDIS_PORT,
+)
+
+redis_consumer = rc.RedisScrapedArticleConsumer(
+  redis_handler,
+  stream_name=REDIS_STREAM_NAME,
+  consumer_group=REDIS_CONSUMER_GROUP,
+)
+
+article_batcher = ab.ArticleBatcher(
+  redis_consumer,
+  max_batch_size=MAX_BATCH_SIZE,
+  max_batch_timeout_millis=MAX_BATCH_TIMEOUT_MILLIS,
+)
+
+# scraper_repo: ScraperRepository = MongoRepository(
+#   host=MONGO_HOST,
+#   port=MONGO_PORT,
+#   db_name=MONGO_DB_SCRAPER,
+#   collection_name=MONGO_COLLECTION_SCRAPER,
+# ) 
 
 # TODO: separate this processing stuff into a proper business layer
 
-def process_notification(notifications: list[ScraperDoneNotification]):
+# def process_notification(notifications: list[ScraperDoneNotification]):
 
-  ids = [m.id for m in notifications]
+#   ids = [m.id for m in notifications]
   
-  # TODO: use Processes and a process pool executor?
+#   # TODO: use Processes and a process pool executor?
 
-  # get the scraped batch
-  docs = scraper_repo.get_article_batch(ids) 
-  if len(docs) == 0:
-    log.warning(f"no documents found in scraped batch, exiting")
-    return
+#   # get the scraped batch
+#   docs = scraper_repo.get_article_batch(ids) 
+#   if len(docs) == 0:
+#     log.warning(f"no documents found in scraped batch, exiting")
+#     return
   
-  # process the batch
-  result_ids = process(docs)
+#   # process the batch
+#   result_ids = process(docs)
 
-  log.info(f"processed {len(result_ids)} elements: {result_ids}")
+#   log.info(f"processed {len(result_ids)} elements: {result_ids}")
 
 
 def process(docs: list[dict]) -> list[str]:
@@ -262,31 +289,35 @@ if __name__ == '__main__':
   #   consumer_group=REDIS_CONSUMER_GROUP
   # ).consume_done_notification(process_notification)
 
-  def print_arts(arts: list[dict]):
-    print("=================")
-    print("printing articles")
-    print("received ", len(arts))
-    for art in arts:
-      print(art)
-    print("=================")
+  # def print_arts(arts: list[dict]):
+  #   print("=================")
+  #   print("printing articles")
+  #   print("received ", len(arts))
+  #   for art in arts:
+  #     print(art)
+  #   print("=================")
 
-  import api.scraped_articles.redis_article_consumer as rc
-  import api.scraped_articles.article_batcher as ab
 
-  r = rc.RedisScrapedArticleConsumer(
-    REDIS_HOST,
-    REDIS_PORT,
-    stream_name="test",
-    consumer_group="test",
-  )
+  # redis_handler = rh.RedisHandler(
+  #   REDIS_HOST,
+  #   REDIS_PORT
+  # )
 
-  b = ab.ArticleBatcher(
-    r,
-    max_batch_size=3,
-    max_batch_timeout_millis=5000,
-  )
+  # r = rc.RedisScrapedArticleConsumer(
+  #   redis_handler,
+  #   stream_name=REDIS_STREAM_NAME,
+  #   consumer_group=REDIS_CONSUMER_GROUP,
+  # )
 
-  b.consume_batched_articles(print_arts)
+  # b = ab.ArticleBatcher(
+  #   r,
+  #   max_batch_size=100,
+  #   max_batch_timeout_millis=15000,
+  # )
+
+  # b.consume_batched_articles(print)
+
+  article_batcher.consume_batched_articles(process)
 
 
   

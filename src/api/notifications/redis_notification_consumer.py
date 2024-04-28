@@ -13,7 +13,7 @@ class RedisScraperEventConsumer(ScraperEventConsumer):
   
   def consume_done_notification(self, callback: Callable[[ScraperDoneNotification], None], *callback_args) -> None:
 
-    def message_extractor_wrapper(message: tuple[str, dict]):
+    def message_extractor_wrapper(message: tuple[str, dict], ack: Callable[[], None]):
       # transform the json redis message into a list of scraper done notifications
       notification_list = json.loads(message[1]["done"])
       notifications = [ScraperDoneNotification(
@@ -21,5 +21,8 @@ class RedisScraperEventConsumer(ScraperEventConsumer):
       ) for notification in notification_list]
 
       callback(notifications, *callback_args)
+
+      # ack the consumed message
+      ack()
       
     self.rh.consume_stream(self.stream_name, self.consumer_group, message_extractor_wrapper)

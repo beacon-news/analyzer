@@ -283,7 +283,7 @@ if __name__ == '__main__':
   b = ab.ArticleBatcher(
     r,
     max_batch_size=3,
-    max_batch_timeout_millis=15000,
+    max_batch_timeout_millis=3000,
   )
 
   b.consume_batched_articles(print_arts)

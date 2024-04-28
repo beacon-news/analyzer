@@ -1,7 +1,8 @@
 import redis
 import redis.exceptions
-import uuid
+import typing as t
 import time
+import uuid
 from random import randint
 from utils import log_utils
 import threading
@@ -10,8 +11,10 @@ import threading
 class RedisHandler:
 
   def __init__(self, redis_host, redis_port):
+    import logging
     self.log = log_utils.create_console_logger(
       self.__class__.__name__,
+      level=logging.DEBUG
     )
     self.host = redis_host
     self.port = redis_port
@@ -27,7 +30,16 @@ class RedisHandler:
       time.sleep(backoff / 1000)
       backoff *= 2
 
-  def consume_stream(self, stream_name, consumer_group, callback, *callback_args):
+  def consume_stream(
+    self, 
+    stream_name, 
+    consumer_group, 
+    callback: t.Callable[[tuple[str, t.Any], t.Callable[[], None]], None], 
+    *callback_args,
+    claim_messages_idle_millis: int = 30000, # 30s
+    claim_check_interval_millis: int = 120000, # 2m
+    claim_max_count: int = 20,
+  ):
     
     consumer_name = f"{consumer_group}_{uuid.uuid4().hex}"
     xread_count = 10
@@ -42,7 +54,16 @@ class RedisHandler:
     # try to claim pending messages from other consumers
     autoclaim_exit = threading.Event()
     autoclaim_thread = threading.Thread(
-      target=self.__auto_claim, args=(stream_name, consumer_group, consumer_name, autoclaim_exit)
+      target=self.__auto_claim, 
+      args=(
+        stream_name, 
+        consumer_group, 
+        consumer_name, 
+        autoclaim_exit, 
+        claim_messages_idle_millis, 
+        claim_check_interval_millis, 
+        claim_max_count,
+      )
     )
     autoclaim_thread.start()
 
@@ -73,6 +94,7 @@ class RedisHandler:
         self.log.exception("unknown error while consuming message")
         return
       except KeyboardInterrupt:
+        # TODO: remove consumer if it doesn't have any pending messages
         self.log.info("shutting down consumer, waiting for autoclaim thread to finish")
         autoclaim_exit.set() 
         autoclaim_thread.join()
@@ -94,17 +116,23 @@ class RedisHandler:
         try:
 
           # process the message
-          callback(message, *callback_args)
-          self.log.debug(f"processed message {message}")
 
-          self.r.xack(stream_name, consumer_group, message[0])
-          self.log.debug(f"ack-d message {message}")
-          last_id = message[0]
+          # we are not 'ack'ing the message, it's up to the callback to decide when a message is processed
+          # and when it can be acked
+
+          message_id = message[0]
+
+          # callback(message, ack, *callback_args)
+          callback(message, self.__make_ack_function(stream_name, consumer_group, message_id), *callback_args)
+          self.log.debug(f"processed message {message_id}")
 
           if was_pending:
-            self.log.debug(f"consumed pending message {message}")
+            self.log.debug(f"consumed pending message {message_id}")
           else:
-            self.log.debug(f"consumed message {message}")
+            self.log.debug(f"consumed message {message_id}")
+
+          # reset the last_id so we consume pending messages starting from this id in the next iteration
+          last_id = message[0]
 
           # TODO: decide on this
           # do we want to delete?
@@ -118,13 +146,28 @@ class RedisHandler:
           autoclaim_thread.join()
           raise
 
+  def __make_ack_function(self, stream_name, consumer_group, message_id):
+    def ack():
+      self.r.xack(stream_name, consumer_group, message_id)
+      self.log.debug(f"ack-d message {message_id}")
+    return ack
 
-  def __auto_claim(self, stream_name, consumer_group, consumer_name, exit_event: threading.Event): 
 
-    xclaim_idle_time = 1000
-    xclaim_count = 10
-    claim_interval = 5000
+  def __auto_claim(
+    self, 
+    stream_name, 
+    consumer_group, 
+    consumer_name, 
+    exit_event: threading.Event,
+    claim_messages_idle_millis: int = 30000, # 30s
+    claim_check_interval_millis: int = 120000, # 2m
+    claim_max_count: int = 20,
+  ): 
+    # separate sleep interval to sleep between iterations
+    check_interval = 500
 
+    # counter to know when to check for pending messages
+    millis_without_checking = 0
     while True:
       
       # try to claim pending messages from other consumers
@@ -132,22 +175,26 @@ class RedisHandler:
         self.log.debug("exiting autoclaim thread")
         break
 
-      try:
-        claimed = self.r.xautoclaim(
-          stream_name, 
-          consumer_group, 
-          consumer_name, 
-          min_idle_time=xclaim_idle_time, 
-          start_id="0-0", 
-          count=xclaim_count, 
-          justid=True,
-        )
-        if len(claimed) > 0:
-          self.log.debug(f"autoclaimed messages, total pending messages: {len(claimed)}")
-      except Exception:
-        self.log.exception("error while autoclaiming messages")
+      if millis_without_checking >= claim_check_interval_millis:
+        millis_without_checking = 0
+
+        try:
+          claimed = self.r.xautoclaim(
+            stream_name, 
+            consumer_group, 
+            consumer_name, 
+            min_idle_time=claim_messages_idle_millis, 
+            start_id="0-0", 
+            count=claim_max_count, 
+            justid=True,
+          )
+          if len(claimed) > 0:
+            self.log.debug(f"autoclaimed messages, total claimed pending messages: {len(claimed)}")
+        except Exception:
+          self.log.exception("error while autoclaiming messages")
       
-      time.sleep(claim_interval / 1000)
+      time.sleep(check_interval / 1000)
+      millis_without_checking += check_interval
     
 
   def __try_create_consumer_group(self, stream_name, consumer_group):

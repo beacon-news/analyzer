@@ -15,66 +15,84 @@ class ArticleBatcher:
     self.log = log_utils.create_console_logger(
       self.__class__.__name__,
     )
-    self.consumer = consumer
-    self.max_batch_size = max_batch_size
-    self.max_batch_timeout_millis = max_batch_timeout_millis
+    self.__consumer = consumer
+    self.__max_batch_size = max_batch_size
+    self.__max_batch_timeout_millis = max_batch_timeout_millis
 
-    self.queue = []
-    self.interval_thread = None
-
+    self.__queue = []
+    self.__interval_thread = None
+    self.__acks_to_call = []
   
-  def add_article(self, article: dict):
+  def _ack_messages(self) -> None:
+    while len(self.__acks_to_call) > 0:
+      print("calling ack")
+      ack = self.__acks_to_call.pop()
+      ack()
+  
+  def _add_article(self, article: dict, ack: Callable[[], None]) -> None:
 
     # skip an iteration of the timeout interval thread, this function only gets called
     # if there wan an event
-    self.skip_iteration_flag.set()
+    self.__skip_iteration_flag.set()
 
     try:
-      self.queue_lock.acquire()
-      if len(self.queue) < self.max_batch_size:
-        self.log.info("adding article to queue")
-        self.queue.append(article)
-      else:
+      self.__queue_lock.acquire()
+
+      self.log.info("adding article to queue")
+      self.__queue.append(article)
+
+      # add the 'ack' function to call after the message is processed by the batch function
+      self.__acks_to_call.append(ack)
+
+      if len(self.__queue) == self.__max_batch_size:
         # consume and skip interval
-        self.log.info(f"max batch size of {self.max_batch_size} reached, calling callback")
-        self.consume_callback(self.queue, *self.consume_args)
-        self.queue = []
+        self.log.info(f"max batch size of {self.__max_batch_size} reached, calling callback")
+        self.__consume_callback(self.__queue, *self.__consume_args)
+
+        # ack the messages on successful processing
+        self._ack_messages()
+        self.__queue = []
     finally:
-        self.queue_lock.release()
+        self.__queue_lock.release()
   
   
   def consume_batched_articles(self, callback: Callable[[list[dict]], None], *callback_args) -> None:
     
-    self.consume_callback = callback
-    self.consume_args = callback_args
+    self.__consume_callback = callback
+    self.__consume_args = callback_args
 
-    if self.interval_thread is not None:
-      self.interval_thread.stop_flag.set()
-      self.interval_thread.join()
-      self.interval_thread = None
+    if self.__interval_thread is not None:
+      self.__interval_thread.stop_flag.set()
+      self.__interval_thread.join()
+      self.__interval_thread = None
 
-    self.skip_iteration_flag = Event()
-    self.stop_flag = Event()
-    self.queue_lock = RLock()
+    self.__skip_iteration_flag = Event()
+    self.__stop_flag = Event()
+    self.__queue_lock = RLock()
 
     def callback_wrapper():
       try:
-        self.queue_lock.acquire()
-        if len(self.queue) > 0:
-          self.consume_callback(self.queue, *self.consume_args)
-        self.queue = []
-      finally:
-        self.queue_lock.release()
+        self.__queue_lock.acquire()
+        if len(self.__queue) > 0:
+          self.__consume_callback(self.__queue, *self.__consume_args)
 
-    self.interval_thread = IntervalThread(
-      self.max_batch_timeout_millis,
-      self.skip_iteration_flag,
-      self.stop_flag,
+        # ack the messages on successful processing
+        self._ack_messages()
+
+        self.__queue = []
+      finally:
+        self.__queue_lock.release()
+
+    self.__interval_thread = IntervalThread(
+      self.__max_batch_timeout_millis,
+      self.__skip_iteration_flag,
+      self.__stop_flag,
       target=callback_wrapper
     )     
-    self.interval_thread.start()
+    self.__interval_thread.start()
 
-    self.consumer.consume_article(lambda article: self.add_article(article))
+    # self.consumer.consume_article(lambda article: self.add_article(article))
+    self.__consumer.consume_article(self._add_article)
     
 
 class IntervalThread(Thread):
