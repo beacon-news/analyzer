@@ -14,7 +14,6 @@ class RedisHandler:
     import logging
     self.log = log_utils.create_console_logger(
       self.__class__.__name__,
-      level=logging.DEBUG
     )
     self.host = redis_host
     self.port = redis_port
