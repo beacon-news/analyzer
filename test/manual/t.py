@@ -1,11 +1,11 @@
-from api.notifications import RedisScraperEventConsumer, ScraperDoneNotification
-from analysis.classifier import CategoryClassifier, ModelContainer
-from analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
-from analysis.ner import SpacyEntityRecognizer
-from domain import *
-from utils import log_utils
-from repository.analyzer import *
-from repository.scraper import *
+from src.api.notifications import RedisScraperEventConsumer, ScraperDoneNotification
+from src.analysis.classifier import CategoryClassifier, ModelContainer
+from src.analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
+from src.analysis.ner import SpacyEntityRecognizer
+from src.domain import *
+from src.utils import log_utils
+from src.repository.analyzer import *
+from src.repository.scraper import *
 from datetime import datetime
 import os
 import hashlib

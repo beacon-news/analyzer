@@ -6,7 +6,6 @@ charset-normalizer==3.3.2
 click==8.1.7
 Cython==0.29.37
 elasticsearch==8.12.1
-pymongo==4.6.2
 filelock==3.9.0
 Flask==3.0.2
 fsspec==2024.2.0
