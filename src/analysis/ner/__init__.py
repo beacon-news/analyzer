@@ -1,1 +1,0 @@
-from analysis.ner.entity_recognizer import SpacyEntityRecognizer

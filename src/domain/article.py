@@ -26,7 +26,6 @@ class Article(pydantic.BaseModel):
 
   analyzed_categories: list[Category] # subset of 'categories', only contains the categories that were assigned by the analyzer
   embeddings: list[float]
-  entities: list[str]
 
   # topics part
   # topics are optional, will be added later by the topic modeler

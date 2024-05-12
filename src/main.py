@@ -1,6 +1,5 @@
 from analysis.classifier import CategoryClassifier, ModelContainer
 from analysis.embeddings import EmbeddingsModelContainer, EmbeddingsModel
-from analysis.ner import SpacyEntityRecognizer
 
 from api.scraped_articles.redis_article_consumer import RedisScrapedArticleConsumer
 from api.scraped_articles.article_batcher import ArticleBatcher
@@ -24,8 +23,6 @@ def check_env(name: str, default=None) -> str:
 # ML models
 CAT_CLF_MODEL_PATH = check_env('CAT_CLF_MODEL_PATH')
 EMBEDDINGS_MODEL_PATH = check_env('EMBEDDINGS_MODEL_PATH')
-SPACY_MODEL = check_env('SPACY_MODEL')
-SPACY_MODEL_DIR = check_env('SPACY_MODEL_DIR')
 
 # Redis
 REDIS_HOST = check_env('REDIS_HOST', 'localhost')
@@ -52,7 +49,6 @@ log.info(f"Initializing dependencies")
 
 category_classifier = CategoryClassifier(ModelContainer.load(CAT_CLF_MODEL_PATH))
 embeddings_model = EmbeddingsModel(EmbeddingsModelContainer.load(EMBEDDINGS_MODEL_PATH))
-named_entity_recognizer = SpacyEntityRecognizer(SPACY_MODEL, SPACY_MODEL_DIR)
 
 repository: AnalyzerRepository = ElasticsearchRepository(
   ELASTIC_CONN, 
@@ -105,14 +101,14 @@ def process(docs: list[dict]) -> list[str]:
       return []
 
     # run analysis in batch
-    category_labels, embeddings, entities = analyze_batch(prepared_texts)
+    category_labels, embeddings = analyze_batch(prepared_texts)
 
     # gather the categories and articles
     articles = []
     unique_category_names = set()
     categories = {}
     analyze_time = datetime.now()
-    for scr_art, art_categories, art_embeddings, art_entities in zip(scraped_articles, category_labels, embeddings, entities):
+    for scr_art, art_categories, art_embeddings in zip(scraped_articles, category_labels, embeddings):
       
       # gather the categories
       meta_categories = [cat.strip().lower() for cat in scr_art.metadata.categories]
@@ -144,7 +140,6 @@ def process(docs: list[dict]) -> list[str]:
           analyze_time=analyze_time,
           analyzed_categories=predicted_categories,
           embeddings=art_embeddings,
-          entities=art_entities,
           topics=None
         )
       )
@@ -244,15 +239,9 @@ def analyze_batch(texts: list[str]) -> list[tuple[list[str], list[float], list[s
   # create embeddings, take the first one as we only have 1 document
   embeddings = embeddings_model.encode(texts)
 
-  # get named entities
-  entities = named_entity_recognizer.ner_batch(texts)
-
-  return (labels, embeddings.tolist(), entities)
+  return (labels, embeddings.tolist())
 
 
 if __name__ == '__main__':
 
   article_batcher.consume_batched_articles(process)
-
-
-  

@@ -61,9 +61,6 @@ class ElasticsearchRepository(AnalyzerRepository):
                 "type": "dense_vector",
                 "dims": 384, # depends on the embeddings model
               },
-              "entities": {
-                "type": "text"
-              },
             }
           },
           "article": {
@@ -159,7 +156,6 @@ class ElasticsearchRepository(AnalyzerRepository):
       "analyze_time": article.analyze_time.isoformat(),
       "analyzer": {
         "category_ids": [cat.id for cat in article.analyzed_categories],
-        "entities": article.entities,
         "embeddings": article.embeddings,
       },
       "article": {

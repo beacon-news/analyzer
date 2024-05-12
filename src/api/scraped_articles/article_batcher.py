@@ -23,39 +23,6 @@ class ArticleBatcher:
     self.__interval_thread = None
     self.__acks_to_call = []
   
-  def _ack_messages(self) -> None:
-    while len(self.__acks_to_call) > 0:
-      print("calling ack")
-      ack = self.__acks_to_call.pop()
-      ack()
-  
-  def _add_article(self, article: dict, ack: Callable[[], None]) -> None:
-
-    # skip an iteration of the timeout interval thread, this function only gets called
-    # if there wan an event
-    self.__skip_iteration_flag.set()
-
-    try:
-      self.__queue_lock.acquire()
-
-      self.log.info("adding article to queue")
-      self.__queue.append(article)
-
-      # add the 'ack' function to call after the message is processed by the batch function
-      self.__acks_to_call.append(ack)
-
-      if len(self.__queue) == self.__max_batch_size:
-        # consume and skip interval
-        self.log.info(f"max batch size of {self.__max_batch_size} reached, calling callback")
-        self.__consume_callback(self.__queue, *self.__consume_args)
-
-        # ack the messages on successful processing
-        self._ack_messages()
-        self.__queue = []
-    finally:
-        self.__queue_lock.release()
-  
-  
   def consume_batched_articles(self, callback: Callable[[list[dict]], None], *callback_args) -> None:
     
     self.__consume_callback = callback
@@ -91,9 +58,40 @@ class ArticleBatcher:
     )     
     self.__interval_thread.start()
 
-    # self.consumer.consume_article(lambda article: self.add_article(article))
     self.__consumer.consume_article(self._add_article)
     
+  def _add_article(self, article: dict, ack: Callable[[], None]) -> None:
+
+    # skip an iteration of the timeout interval thread, this function only gets called
+    # if there wan an event
+    self.__skip_iteration_flag.set()
+
+    try:
+      self.__queue_lock.acquire()
+
+      self.log.info("adding article to queue")
+      self.__queue.append(article)
+
+      # add the 'ack' function to call after the message is processed by the batch function
+      self.__acks_to_call.append(ack)
+
+      if len(self.__queue) == self.__max_batch_size:
+        # consume and skip interval
+        self.log.info(f"max batch size of {self.__max_batch_size} reached, calling callback")
+        self.__consume_callback(self.__queue, *self.__consume_args)
+
+        # ack the messages on successful processing
+        self._ack_messages()
+        self.__queue = []
+    finally:
+        self.__queue_lock.release()
+  
+  def _ack_messages(self) -> None:
+    while len(self.__acks_to_call) > 0:
+      print("calling ack")
+      ack = self.__acks_to_call.pop()
+      ack()
+  
 
 class IntervalThread(Thread):
 
@@ -122,5 +120,3 @@ class IntervalThread(Thread):
         self.log.debug("interval thread skipped iteration")
 
       self.skip_iteration_flag.clear()
-
-
