@@ -11,7 +11,6 @@ import threading
 class RedisHandler:
 
   def __init__(self, redis_host, redis_port):
-    import logging
     self.log = log_utils.create_console_logger(
       self.__class__.__name__,
     )
@@ -121,7 +120,6 @@ class RedisHandler:
 
           message_id = message[0]
 
-          # callback(message, ack, *callback_args)
           callback(message, self.__make_ack_function(stream_name, consumer_group, message_id), *callback_args)
           self.log.debug(f"processed message {message_id}")
 

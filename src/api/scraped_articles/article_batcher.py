@@ -63,7 +63,7 @@ class ArticleBatcher:
   def _add_article(self, article: dict, ack: Callable[[], None]) -> None:
 
     # skip an iteration of the timeout interval thread, this function only gets called
-    # if there wan an event
+    # if there was an event
     self.__skip_iteration_flag.set()
 
     try:
@@ -88,7 +88,6 @@ class ArticleBatcher:
   
   def _ack_messages(self) -> None:
     while len(self.__acks_to_call) > 0:
-      print("calling ack")
       ack = self.__acks_to_call.pop()
       ack()
   

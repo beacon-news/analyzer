@@ -4,7 +4,7 @@ from datetime import datetime
 
 class ScrapedArticleMetadata(pydantic.BaseModel):
   source: str | None = None
-  categories: list[str] | None = None 
+  categories: list[str] | None = [] 
 
 
 class ScrapedArticle(pydantic.BaseModel):
