@@ -75,7 +75,6 @@ class JsonFormatter(logging.Formatter):
         "message": str(exc),
         "trace": traceback.format_exc(limit=5),
       }
-      # msg_dict["exc_info"] = str(record.exc_info)
 
     # add arguments from 'args'
     # e.g. log.info("something", {"foo": "bar"})

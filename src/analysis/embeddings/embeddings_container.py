@@ -1,7 +1,6 @@
 import pickle
 from datetime import date
 
-# Contains the documents, embeddings, embeddings model
 
 class EmbeddingsModelContainer: pass
 
